@@ -123,6 +123,8 @@ jobs:
             --collect-all zeroconf \
             --collect-submodules pkg_resources \
             --hidden-import=network_sync \
+            --hidden-import=zeroconf \
+            --collect-submodules zeroconf \
             --hidden-import=uvicorn.logging \
             --hidden-import=uvicorn.loops \
             --hidden-import=uvicorn.loops.auto \
@@ -155,6 +157,8 @@ jobs:
             --collect-all zeroconf ^
             --collect-submodules pkg_resources ^
             --hidden-import=network_sync ^
+            --hidden-import=zeroconf ^
+            --collect-submodules zeroconf ^
             --hidden-import=uvicorn.logging ^
             --hidden-import=uvicorn.loops ^
             --hidden-import=uvicorn.loops.auto ^
@@ -186,6 +190,8 @@ jobs:
             --collect-all zeroconf \
             --collect-submodules pkg_resources \
             --hidden-import=network_sync \
+            --hidden-import=zeroconf \
+            --collect-submodules zeroconf \
             --hidden-import=uvicorn.logging \
             --hidden-import=uvicorn.loops \
             --hidden-import=uvicorn.loops.auto \
