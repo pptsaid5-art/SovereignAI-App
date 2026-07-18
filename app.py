@@ -8,6 +8,7 @@ import time
 import socket
 import platform
 import hashlib
+import subprocess
 import httpx
 import webbrowser
 from typing import List, Optional
@@ -424,9 +425,84 @@ class BrowserRequest(BaseModel):
     url: str
 
 
+def open_browser_reliably(url: str) -> bool:
+    """
+    يفتح رابطاً بالمتصفح الافتراضي، ويرجع حالة نجاح حقيقية (وليس افتراضاً
+    أعمى). هذا ضروري لأن PyInstaller (--onefile) على لينكس تحديداً يضبط
+    مؤقتاً متغير بيئة LD_LIBRARY_PATH ليشير لمكتبات مضمَّنة داخل الحزمة
+    نفسها أثناء تشغيل التطبيق. هذا يعمل صحيحاً للتطبيق نفسه، لكنه يكسر
+    غالباً أي عملية خارجية (subprocess) يُطلقها التطبيق — مثل المتصفح —
+    لأن المتصفح الخارجي يحاول تحميل مكتباته الخاصة (GTK, glib, إلخ) لكنه
+    يجد بدلاً منها نسخاً مضمَّنة داخل حزمة PyInstaller غير متوافقة معه،
+    فيفشل الإطلاق بصمت دون رفع أي استثناء يلتقطه webbrowser.open().
+
+    الحل: ننظّف نسخة من متغيرات البيئة (خاصة LD_LIBRARY_PATH) قبل تشغيل
+    المتصفح كعملية منفصلة تماماً، حتى يستخدم مكتبات النظام الحقيقية بدل
+    مكتبات PyInstaller المضمَّنة.
+    """
+    # بيئة نظيفة للعملية الفرعية: نحذف LD_LIBRARY_PATH الذي يضبطه PyInstaller
+    # مؤقتاً (يظهر عادة كـ _MEIPASS أو مسار مؤقت يحتوي على مكتبات الحزمة)
+    clean_env = os.environ.copy()
+    clean_env.pop("LD_LIBRARY_PATH", None)
+    # PyInstaller أحياناً يحفظ القيمة الأصلية هنا قبل الكتابة فوقها؛ نستعيدها إن وُجدت
+    original_ld_path = os.environ.get("LD_LIBRARY_PATH_ORIG")
+    if original_ld_path:
+        clean_env["LD_LIBRARY_PATH"] = original_ld_path
+
+    # محاولة 1: أوامر النظام المباشرة (الأكثر موثوقية على لينكس تحديداً)
+    if platform.system() == "Linux":
+        for opener in ("xdg-open", "gio", "gnome-open", "kde-open"):
+            try:
+                args = [opener, "open", url] if opener == "gio" else [opener, url]
+                result = subprocess.run(
+                    args, env=clean_env, timeout=5,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                if result.returncode == 0:
+                    return True
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+
+    elif platform.system() == "Darwin":
+        try:
+            result = subprocess.run(["open", url], env=clean_env, timeout=5,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if result.returncode == 0:
+                return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+    elif platform.system() == "Windows":
+        try:
+            os.startfile(url)  # noqa: available on Windows only
+            return True
+        except Exception:
+            pass
+
+    # محاولة 2 (احتياط أخير): webbrowser القياسية، بنفس البيئة النظيفة
+    try:
+        old_ld_path = os.environ.get("LD_LIBRARY_PATH")
+        if "LD_LIBRARY_PATH" in clean_env:
+            os.environ["LD_LIBRARY_PATH"] = clean_env["LD_LIBRARY_PATH"]
+        else:
+            os.environ.pop("LD_LIBRARY_PATH", None)
+        try:
+            return bool(webbrowser.open(url))
+        finally:
+            if old_ld_path is not None:
+                os.environ["LD_LIBRARY_PATH"] = old_ld_path
+    except Exception:
+        return False
+
+
 @app.post("/api/open-external")
 async def open_external_link(req: BrowserRequest):
-    webbrowser.open(req.url)
+    success = open_browser_reliably(req.url)
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="تعذّر فتح المتصفح تلقائياً. افتح هذا الرابط يدوياً: " + req.url,
+        )
     return {"status": "opened"}
 
 
@@ -444,8 +520,14 @@ async def open_checkout(plan: str):
     order_id بعد نجاح الدفع عبر PayPal (تُستخدم لاحقاً في /api/subscribe/verify).
     """
     checkout_url = f"{CHECKOUT_PAGE_URL}?hwid={DEVICE_HWID}&plan={plan}"
-    webbrowser.open(checkout_url)
+    success = open_browser_reliably(checkout_url)
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="تعذّر فتح المتصفح تلقائياً. افتح هذا الرابط يدوياً: " + checkout_url,
+        )
     return {"status": "opened", "url": checkout_url}
+
 
 
 @app.get("/")
