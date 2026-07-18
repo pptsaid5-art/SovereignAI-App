@@ -14,3 +14,5 @@ qtpy==2.4.1
 tqdm==4.66.4
 PyQtWebEngine==5.15.6
 pypdf==4.2.0
+zeroconf
+jaraco.collections
