@@ -939,12 +939,25 @@
             btn.innerHTML = `<span class="material-symbols-rounded text-lg animate-spin">progress_activity</span>`;
 
             try {
-                await fetch(`/api/subscribe/open-checkout?plan=${encodeURIComponent(fullPlanId)}`, {
+                const res = await fetch(`/api/subscribe/open-checkout?plan=${encodeURIComponent(fullPlanId)}`, {
                     method: 'POST',
                 });
-                showToast(currentLang === 'ar'
-                    ? 'فُتحت صفحة الدفع في متصفحك. بعد إتمام الدفع، اضغط "تحقق الآن" هنا.'
-                    : 'Checkout page opened in your browser. After payment, click "Check Now" here.', 'success');
+
+                if (res.ok) {
+                    showToast(currentLang === 'ar'
+                        ? 'فُتحت صفحة الدفع في متصفحك. بعد إتمام الدفع، اضغط "تحقق الآن" هنا.'
+                        : 'Checkout page opened in your browser. After payment, click "Check Now" here.', 'success');
+                } else {
+                    // الخادم لم يستطع فتح المتصفح فعلياً (مثلاً بيئة بدون متصفح افتراضي
+                    // واضح). نعرض الرابط نفسه حتى يفتحه المستخدم يدوياً بدل فشل صامت.
+                    let detail = translations[currentLang].toast_error;
+                    try {
+                        const data = await res.json();
+                        if (data.detail) detail = data.detail;
+                    } catch (parseErr) { /* تجاهل، نستخدم الرسالة الافتراضية */ }
+                    errorEl.textContent = detail;
+                    errorEl.classList.remove('hidden');
+                }
             } catch (e) {
                 errorEl.textContent = translations[currentLang].toast_error;
                 errorEl.classList.remove('hidden');
