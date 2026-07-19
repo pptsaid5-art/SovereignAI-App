@@ -1,4 +1,4 @@
-name: Build Sovereign AI Node (Windows / macOS / Linux)
+name: Build Sovereign AI Node (Windows / macOS / Linux / Android)
 
 on:
   push:
@@ -247,24 +247,64 @@ jobs:
             --icon="app_icon.icns" app.py
 
       # ===================================================
-      # اختصار سطح المكتب — Linux فقط (macOS/Windows المستخدم يشغّل
-      # الملف التنفيذي مباشرة أو ينشئ اختصاره يدوياً بسهولة من الواجهة)
+      # اختصار سطح المكتب — Linux فقط.
+      #
+      # ملاحظة إصلاح مهمة: النسخة السابقة استخدمت "%k" في حقول Exec/Icon،
+      # وهذا متغيّر قديم جداً (من مواصفة KDE 1.x) وغير مدعوم إطلاقاً بمواصفة
+      # freedesktop.org الحديثة التي تعتمدها GNOME/Nautilus اليوم. النتيجة:
+      # "dirname %k" يفشل بصمت ويرجع قيمة فارغة، فيسقط تحميل الأيقونة تماماً
+      # ويظهر النظام الأيقونة الافتراضية بدلاً من app_icon.png الحقيقية.
+      #
+      # الحل: بدل الاعتماد على مسار نسبي متحرك غير موثوق، ننشئ سكربت تثبيت
+      # install.sh يُشغَّل مرة واحدة من قبل المستخدم بعد فك الضغط. هذا
+      # السكربت ينسخ التطبيق والأيقونة إلى مسار ثابت ومعروف مسبقاً
+      # (~/.local/share/sovereignai-node/) ثم يكتب ملف .desktop يشير
+      # إلى ذلك المسار الثابت بشكل مطلق ونهائي — فتضمن ظهور الأيقونة
+      # الصحيحة في كل من شريط المهام والنافذة بعد أول تشغيل.
       # ===================================================
-      - name: Create Linux Desktop Shortcut
+      - name: Create Linux Desktop Shortcut + Installer Script
         if: matrix.platform == 'linux'
         run: |
-          cat <<EOF > dist/SovereignAI.desktop
+          cat <<'EOF' > dist/install.sh
+          #!/bin/bash
+          # سكربت تثبيت لمرة واحدة: ينسخ التطبيق لمسار ثابت وينشئ اختصار
+          # سطح مكتب صحيح (يحل مشكلة الأيقونة التي لا تظهر مع "%k").
+          set -e
+
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          INSTALL_DIR="$HOME/.local/share/sovereignai-node"
+          DESKTOP_DIR="$HOME/.local/share/applications"
+
+          mkdir -p "$INSTALL_DIR"
+          mkdir -p "$DESKTOP_DIR"
+
+          cp "$SCRIPT_DIR/SovereignAI-Node" "$INSTALL_DIR/"
+          cp "$SCRIPT_DIR/app_icon.png" "$INSTALL_DIR/"
+          chmod +x "$INSTALL_DIR/SovereignAI-Node"
+
+          cat > "$DESKTOP_DIR/SovereignAI.desktop" <<DESKTOP
           [Desktop Entry]
           Version=1.0
           Type=Application
           Name=Sovereign AI Node
           Comment=Sovereign AI Enterprise Local Node
-          Exec=sh -c "QT_XCB_GL_INTEGRATION=none LIBGL_ALWAYS_SOFTWARE=1 \\\$(dirname %k)/${{ env.APP_NAME }}"
-          Icon=\\\$(dirname %k)/app_icon.png
+          Exec=env QT_XCB_GL_INTEGRATION=none LIBGL_ALWAYS_SOFTWARE=1 $INSTALL_DIR/SovereignAI-Node
+          Icon=$INSTALL_DIR/app_icon.png
           Terminal=false
           Categories=Development;Science;IDE;
+          DESKTOP
+
+          chmod +x "$DESKTOP_DIR/SovereignAI.desktop"
+          gio set "$DESKTOP_DIR/SovereignAI.desktop" metadata::trusted true 2>/dev/null || true
+
+          # تحديث قاعدة بيانات قوائم التطبيقات (تظهر بقائمة تطبيقات النظام أيضاً)
+          update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+
+          echo ""
+          echo "تم التثبيت بنجاح! ستجد Sovereign AI Node في قائمة التطبيقات،"
+          echo "ويمكنك أيضاً تشغيله من سطح المكتب إن نسخت الاختصار يدوياً."
           EOF
-          chmod +x dist/SovereignAI.desktop
+          chmod +x dist/install.sh
           cp app_icon.png dist/ || true
 
       # ===================================================
@@ -292,7 +332,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           cd dist
-          tar -czvf ${{ env.APP_NAME }}-linux.tar.gz ${{ env.APP_NAME }} SovereignAI.desktop app_icon.png
+          tar -czvf ${{ env.APP_NAME }}-linux.tar.gz ${{ env.APP_NAME }} install.sh app_icon.png
 
       - name: Archive Build (Windows)
         if: matrix.platform == 'windows'
