@@ -351,6 +351,48 @@ def get_chroma_client():
         return chromadb.PersistentClient(path=RAG_DB_DIR)
 
 
+# اسم نموذج التضمين (embedding) الذي يجب سحبه مسبقاً عبر Ollama.
+# nomic-embed-text خفيف (~274MB) ومخصص للتضمين، ويعمل بالكامل محلياً بدون إنترنت.
+OLLAMA_EMBEDDING_MODEL = os.environ.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
+
+
+class OllamaEmbeddingFunction:
+    """
+    دالة تضمين مخصّصة لـ chromadb تستخدم Ollama المحلي (عبر /api/embeddings)
+    بدل دالة chromadb الافتراضية (ONNXMiniLM_L6_V2)، التي تحاول تحميل
+    نموذجها من الإنترنت (chroma-onnx-models.s3.amazonaws.com) عند أول استخدام.
+    هذا يكسر مبدأ العمل بدون اتصال بالإنترنت الذي يقوم عليه التطبيق بالكامل.
+    يتطلب أن يكون نموذج OLLAMA_EMBEDDING_MODEL مسحوباً مسبقاً عبر:
+        ollama pull nomic-embed-text
+    """
+
+    def __init__(self, model_name: str = OLLAMA_EMBEDDING_MODEL, base_url: str = "http://localhost:11434"):
+        self.model_name = model_name
+        self.base_url = base_url
+
+    def name(self) -> str:
+        return f"ollama-{self.model_name}"
+
+    def __call__(self, input):
+        # واجهة chromadb الحديثة تستدعي الدالة باسم بارامتر "input" (قائمة نصوص)
+        texts = input if isinstance(input, list) else [input]
+        embeddings = []
+        with httpx.Client(timeout=60.0) as client:
+            for text in texts:
+                resp = client.post(
+                    f"{self.base_url}/api/embeddings",
+                    json={"model": self.model_name, "prompt": text},
+                )
+                resp.raise_for_status()
+                embeddings.append(resp.json()["embedding"])
+        return embeddings
+
+
+_ollama_embedding_function = OllamaEmbeddingFunction()
+
+
+
+
 # ---------------------------------------------------------
 # 4. إعداد تطبيق FastAPI
 # ---------------------------------------------------------
@@ -416,6 +458,31 @@ async def install_model_api(request: ModelRequest, bg_tasks: BackgroundTasks):
 @app.get("/api/models/progress")
 async def get_model_progress(model: str):
     return download_status.get(model, {"status": "idle", "progress": 0})
+
+
+@app.get("/api/models/installed")
+async def get_installed_models():
+    """
+    يستعلم فعلياً عن Ollama (عبر /api/tags) لمعرفة أي من نماذجنا
+    (flash/plus/pro) مثبت فعلياً على هذا الجهاز، بدل افتراض أي شيء
+    مسبقاً بالواجهة الأمامية.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get("http://localhost:11434/api/tags")
+            response.raise_for_status()
+            data = response.json()
+    except Exception as e:
+        print(f"[Models] فشل الاستعلام عن نماذج Ollama المثبتة: {str(e)}")
+        return {"installed": []}
+
+    installed_actual_names = {m.get("name") for m in data.get("models", [])}
+    installed_keys = [
+        key for key, actual_name in OLLAMA_MODELS.items()
+        # Ollama قد يرجع الاسم مع أو بدون لاحقة ":latest" حسب الإصدار
+        if actual_name in installed_actual_names or f"{actual_name}:latest" in installed_actual_names
+    ]
+    return {"installed": installed_keys}
 
 
 # ---------------------------------------------------------
@@ -645,7 +712,7 @@ async def upload_endpoint(files: List[UploadFile] = File(...)):
         raise HTTPException(status_code=500, detail="Vector Database not available")
 
     client = get_chroma_client()
-    rag_collection = client.get_or_create_collection(name="company_knowledge")
+    rag_collection = client.get_or_create_collection(name="company_knowledge", embedding_function=_ollama_embedding_function)
 
     for file in files:
         content = await file.read()
@@ -733,7 +800,7 @@ def retrieve_context(query: str, n_results: int = RAG_N_RESULTS) -> dict:
 
     try:
         client = get_chroma_client()
-        rag_collection = client.get_or_create_collection(name="company_knowledge")
+        rag_collection = client.get_or_create_collection(name="company_knowledge", embedding_function=_ollama_embedding_function)
         results = rag_collection.query(
             query_texts=[query],
             n_results=n_results,
@@ -786,13 +853,34 @@ async def chat_endpoint(data: ChatMessage):
     retrieval = retrieve_context(data.message)
 
     if not retrieval["has_context"]:
-        # لا نرسل السؤال للنموذج أصلاً بدون سياق كافٍ — نمنع التخمين من جذوره
-        # بدل الاعتماد فقط على تعليمة نصية قد يتجاهلها النموذج.
-        return {
-            "reply": "هذه المعلومات غير متوفرة في الأرشيف المرفق للشركة.",
-            "sources": [],
-            "grounded": False,
-        }
+        # لا يوجد سياق كافٍ من أرشيف الشركة (إما القاعدة فارغة، أو لا يوجد
+        # مقطع ذو صلة كافية بالسؤال). هذا لا يعني أن السؤال خاطئ أو أن
+        # المستخدم يطلب بيانات شركة — قد يكون سؤالاً عاماً أو تعريفياً بسيطاً.
+        # نسمح للنموذج بالرد كمساعد عام طبيعي، دون أي ذكر للأرشيف أو المصادر.
+        general_system_prompt = """أنت 'مستشار Nexus'، المساعد الذكي المحلي للشركة (يعمل بالكامل دون اتصال بالإنترنت).
+لا تتوفر لديك حالياً أي مقاطع من أرشيف الشركة ذات صلة بهذا السؤال، لذا أجب بشكل طبيعي ومباشر باستخدام معرفتك العامة وقدراتك كمساعد محادثة.
+لا تذكر أرشيف الشركة أو المصادر أو أي عبارة تفيد بعدم توفر معلومات، إلا إذا كان السؤال يتطلب صراحةً بيانات داخلية للشركة لا تملكها فعلاً.
+كن ودوداً ومختصراً ومفيداً."""
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post('http://localhost:11434/api/generate', json={
+                    "model": actual_name,
+                    "system": general_system_prompt,
+                    "prompt": data.message,
+                    "stream": False,
+                })
+                if response.status_code == 200:
+                    result = response.json()
+                    return {
+                        "reply": result.get("response", ""),
+                        "sources": [],
+                        "grounded": False,
+                    }
+                else:
+                    return {"reply": "Error communicating with local AI engine.", "sources": [], "grounded": False}
+        except Exception as e:
+            return {"reply": f"Local AI engine connection failed: {str(e)}", "sources": [], "grounded": False}
 
     system_prompt = """أنت 'مستشار Nexus'، الذكاء الاصطناعي السيادي السري للشركة.
 تعليماتك الصارمة:
