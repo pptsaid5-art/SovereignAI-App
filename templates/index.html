@@ -639,7 +639,9 @@
         }
 
         /* --- نظام التتبع الحقيقي لتحميل النماذج من Ollama --- */
-        let activeModel = 'flash';
+        // لا نفترض أي نموذج "نشط" مسبقاً — activeModel يبقى فارغاً حتى تتأكد
+        // refreshInstalledModels() فعلياً من وجود نموذج مثبت على الجهاز.
+        let activeModel = null;
         // لا نفترض أي نموذج مثبت مسبقاً — نتحقق فعلياً من Ollama عبر
         // refreshInstalledModels() عند بدء التطبيق (انظر DOMContentLoaded بالأسفل).
         let installedModels = [];
@@ -650,6 +652,11 @@
                 if (response.ok) {
                     const data = await response.json();
                     installedModels = data.installed || [];
+                    // إن لم يكن هناك نموذج "نشط" محدد فعلياً، أو كان النموذج
+                    // النشط الحالي غير مثبت بالواقع، نختار أول نموذج مثبت فعلياً
+                    if (!activeModel || !installedModels.includes(activeModel)) {
+                        activeModel = installedModels.length > 0 ? installedModels[0] : null;
+                    }
                 }
             } catch (e) {
                 // لو فشل الاستعلام (مثلاً Ollama لم يبدأ بعد)، نترك القائمة كما هي
@@ -1126,6 +1133,13 @@
             const inputField = document.getElementById('user-input');
             const text = inputField.value.trim();
             if (!text) return;
+
+            if (!activeModel) {
+                showToast(currentLang === 'ar'
+                    ? 'الرجاء تثبيت نموذج ذكاء اصطناعي أولاً من قائمة النماذج'
+                    : 'Please install an AI model first from the models list', 'error');
+                return;
+            }
 
             const welcome = document.getElementById('welcome-screen');
             if (welcome) welcome.remove();
