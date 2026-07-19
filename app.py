@@ -55,7 +55,7 @@ def get_resource_path(relative_path):
 # ---------------------------------------------------------
 
 # عنوان سيرفر الترخيص المركزي (Railway) — لا يحتوي على أي أسرار حساسة هنا
-LICENSE_SERVER_URL = os.environ.get("LICENSE_SERVER_URL", "https://your-app.up.railway.app")
+LICENSE_SERVER_URL = os.environ.get("LICENSE_SERVER_URL", "https://web-production-de335.up.railway.app")
 
 # ملف تخزين محلي بسيط لحالة الترخيص/المؤسسة على هذا الجهاز تحديداً
 LOCAL_STATE_PATH = os.path.join(os.path.abspath("."), "device_state.json")
