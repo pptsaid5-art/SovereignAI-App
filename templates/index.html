@@ -207,7 +207,7 @@
                     </button>
                     <span class="text-xs font-bold flex items-center gap-1.5" id="billing-label-yearly" style="color: var(--text-faint);">
                         <span data-i18n="billing_yearly">سنوي</span>
-                        <span class="text-[10px] px-1.5 py-0.5 rounded" style="background: var(--green-dim); color: var(--green);" data-i18n="billing_save_badge">وفّر أكثر</span>
+                        <span class="text-[10px] px-1.5 py-0.5 rounded" style="background: var(--green-dim); color: var(--green);" data-i18n="billing_save_badge">شهران مجاناً</span>
                     </span>
                 </div>
 
@@ -488,7 +488,7 @@
                 skip_trial_btn: "تخطَّ التجربة، اشترك مباشرة",
                 billing_monthly: "شهري",
                 billing_yearly: "سنوي",
-                billing_save_badge: "وفّر أكثر",
+                billing_save_badge: "شهران مجاناً",
                 plan_pro_name: "Pro",
                 plan_pro_desc: "شارك مع حتى 5 أجهزة بنفس مكتبك (LAN)",
                 plan_ultra_name: "Ultra",
@@ -556,7 +556,7 @@
                 skip_trial_btn: "Skip trial, subscribe directly",
                 billing_monthly: "Monthly",
                 billing_yearly: "Yearly",
-                billing_save_badge: "Save more",
+                billing_save_badge: "2 months free",
                 plan_pro_name: "Pro",
                 plan_pro_desc: "Share with up to 5 devices on your office LAN",
                 plan_ultra_name: "Ultra",
@@ -640,7 +640,23 @@
 
         /* --- نظام التتبع الحقيقي لتحميل النماذج من Ollama --- */
         let activeModel = 'flash';
-        let installedModels = ['flash'];
+        // لا نفترض أي نموذج مثبت مسبقاً — نتحقق فعلياً من Ollama عبر
+        // refreshInstalledModels() عند بدء التطبيق (انظر DOMContentLoaded بالأسفل).
+        let installedModels = [];
+
+        async function refreshInstalledModels() {
+            try {
+                const response = await fetch('/api/models/installed');
+                if (response.ok) {
+                    const data = await response.json();
+                    installedModels = data.installed || [];
+                }
+            } catch (e) {
+                // لو فشل الاستعلام (مثلاً Ollama لم يبدأ بعد)، نترك القائمة كما هي
+                console.error('Failed to refresh installed models:', e);
+            }
+            updateModelsUI();
+        }
 
         function openModelsModal() {
             if (isSystemLocked) return;
@@ -755,6 +771,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             applyLanguage();
             checkLocalLicense();
+            refreshInstalledModels();
 
             // فحص دوري لحالة الترخيص (يسمح باكتشاف انتهاء الاشتراك، وأيضاً
             // بفتح النظام تلقائياً لو المستخدم فعّل المفتاح من نافذة أخرى)
