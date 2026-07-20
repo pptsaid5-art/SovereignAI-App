@@ -12,7 +12,8 @@ import subprocess
 import httpx
 import webbrowser
 from typing import List, Optional
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
+# تمت إضافة Form هنا لاستقبال الـ hwid في الرفع
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request, Form
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -54,54 +55,30 @@ def get_resource_path(relative_path):
 # إعدادات عامة
 # ---------------------------------------------------------
 
-# عنوان سيرفر الترخيص المركزي (Railway) — لا يحتوي على أي أسرار حساسة هنا
 LICENSE_SERVER_URL = os.environ.get("LICENSE_SERVER_URL", "https://web-production-de335.up.railway.app")
-
-# ملف تخزين محلي بسيط لحالة الترخيص/المؤسسة على هذا الجهاز تحديداً
 LOCAL_STATE_PATH = os.path.join(os.path.abspath("."), "device_state.json")
-
-# منفذ chromadb المشترك على الشبكة (مختلف عن منفذ واجهة FastAPI الرئيسي)
 SHARED_DB_PORT = 8001
-
-RAG_DB_DIR = "./local_rag_db"  # يُستخدم فقط عندما يكون هذا الجهاز هو الـ Host
-
-# مهلة السماح بالعمل أوفلاين إذا تعذّر الوصول لسيرفر الترخيص (بالأيام)
+RAG_DB_DIR = "./local_rag_db"
 OFFLINE_GRACE_PERIOD_DAYS = 5
-
-# ---------------------------------------------------------
-# إعدادات جودة الاسترجاع (RAG Retrieval Quality)
-# ---------------------------------------------------------
-# chromadb مع sentence-transformers يستخدم افتراضياً L2 distance (مسافة إقليدية)
-# وليس cosine similarity 0-1. القيمة الأصغر = تشابه أكبر (عكس الـ similarity score).
-# هذي القيمة ابتدائية معقولة، لكن يجب ضبطها فعلياً على بياناتك (شرح الضبط تحت).
 RAG_MAX_DISTANCE = float(os.environ.get("RAG_MAX_DISTANCE", "0.8"))
-
-# عدد أقصى من المقاطع (chunks) التي نرسلها كسياق لكل سؤال
 RAG_N_RESULTS = int(os.environ.get("RAG_N_RESULTS", "4"))
 
 
 # ---------------------------------------------------------
-# 1. هوية الجهاز (HWID) — بصمة ثابتة لكل جهاز
+# 1. هوية الجهاز (HWID)
 # ---------------------------------------------------------
 def get_hardware_id() -> str:
-    """
-    يولّد بصمة شبه ثابتة للجهاز بدون الاعتماد على مكتبات خارجية إضافية،
-    عبر دمج معرّفات نظام التشغيل الأساسية ثم عمل hash عليها.
-    ⚠️ هذه بصمة "معقولة" لا "قطعية" — تغييرات جذرية بالعتاد (تغيير القرص
-    الرئيسي مثلاً) قد تغيّرها. هذا مقبول لغرض عد الأجهزة، وليس تشفيراً أمنياً.
-    """
     try:
         system_info = f"{platform.node()}-{platform.system()}-{platform.machine()}-{platform.processor()}"
     except Exception:
-        system_info = str(uuid.getnode())  # احتياطي: عنوان MAC
+        system_info = str(uuid.getnode())
     return hashlib.sha256(system_info.encode()).hexdigest()[:32]
-
 
 DEVICE_HWID = get_hardware_id()
 
 
 # ---------------------------------------------------------
-# 2. تخزين حالة الترخيص محلياً (Cache) للسماح بالعمل المؤقت أوفلاين
+# 2. تخزين حالة الترخيص
 # ---------------------------------------------------------
 def load_local_state() -> dict:
     if not os.path.exists(LOCAL_STATE_PATH):
@@ -119,12 +96,6 @@ def save_local_state(state: dict):
 
 
 async def verify_license_with_server(hwid: str) -> dict:
-    """
-    يتحقق من صلاحية الترخيص عبر سيرفر Railway المركزي، بناءً على hwid هذا
-    الجهاز فقط (لا يوجد مفهوم "مفتاح مؤسسة" — كل جهاز مشترك مستقل).
-    عند النجاح: يحدّث الكاش المحلي بحالة جديدة + وقت التحقق.
-    عند الفشل (لا إنترنت مثلاً): يرجع لحالة الكاش المحلي ضمن فترة السماح.
-    """
     state = load_local_state()
 
     try:
@@ -153,11 +124,9 @@ async def verify_license_with_server(hwid: str) -> dict:
                 "source": "server",
             }
         else:
-            # السيرفر رد برفض صريح — لا نمنح فترة سماح هنا لأن هذا رفض واضح لا انقطاع اتصال
             return {"valid": False, "plan": None, "source": "server_rejected"}
 
     except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError):
-        # تعذّر الوصول للسيرفر (على الأغلب لا يوجد إنترنت) — نستخدم الكاش المحلي
         if state.get("hwid") == hwid and state.get("active"):
             last_verified = state.get("last_verified_at", 0)
             days_since = (time.time() - last_verified) / 86400
@@ -173,12 +142,6 @@ async def verify_license_with_server(hwid: str) -> dict:
 
 
 async def verify_paypal_order_with_server(order_id: str, hwid: str, plan: str, device_name: str) -> dict:
-    """
-    يُستدعى بعد إتمام المستخدم للدفع عبر PayPal مباشرة من هذا الجهاز.
-    السيرفر (Railway) هو من يتحقق فعلياً من صحة الطلب مع PayPal باستخدام
-    السر المحفوظ هناك فقط، ثم يفعّل اشتراك هذا الـ hwid تحديداً.
-    لا يوجد أي "مفتاح" ينتقل بين المستخدم والتطبيق في هذه العملية.
-    """
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(
@@ -208,13 +171,6 @@ async def verify_paypal_order_with_server(order_id: str, hwid: str, plan: str, d
 
 
 async def start_free_trial_with_server(hwid: str, device_name: str) -> dict:
-    """
-    يطلب من Railway منح هذا الجهاز تجربة مجانية (7 أيام بصلاحيات Ultra كاملة،
-    بدون أي دفع أو بطاقة). القرار النهائي (هل هذا الجهاز استخدم تجربته من
-    قبل أم لا) يُحسم بالكامل على الخادم البعيد اعتماداً على hwid، وليس على
-    أي ملف محلي في هذا الجهاز — لذا حذف device_state.json محلياً لا يمنح
-    تجربة ثانية.
-    """
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
@@ -251,17 +207,11 @@ current_network_state = {
     "is_connected": False, "rejection_reason": None,
 }
 
-
 _chroma_server_started = False
 _chroma_server_lock = threading.Lock()
 
 
 def _start_chroma_http_server():
-    """
-    يشغّل سيرفر chromadb HTTP فعلياً على SHARED_DB_PORT، ليصبح هذا الجهاز
-    قابلاً للوصول من باقي الأجهزة على الشبكة كقاعدة بيانات مشتركة.
-    يُستدعى مرة واحدة فقط عندما يصبح هذا الجهاز Host.
-    """
     global _chroma_server_started
     with _chroma_server_lock:
         if _chroma_server_started:
@@ -269,7 +219,6 @@ def _start_chroma_http_server():
         _chroma_server_started = True
 
     try:
-        # chromadb 0.5.x يوفر سيرفر FastAPI داخلي جاهز للتشغيل ببرمجية
         from chromadb.config import Settings
         from chromadb.server.fastapi import FastAPI as ChromaFastAPI
 
@@ -297,20 +246,14 @@ def on_network_state_change(state: NetworkState):
             "rejection_reason": state.rejection_reason,
         })
 
-    # إذا أصبح هذا الجهاز Host الآن (لأول مرة أو بعد تحول من client)، شغّل سيرفر chromadb
     if state.role == "host" and not was_host_before:
         threading.Thread(target=_start_chroma_http_server, daemon=True).start()
 
 
 def start_network_sync():
-    """
-    يُفعَّل بعد التحقق من ترخيص صالح لهذا الجهاز. لا يحتاج أي مفتاح —
-    القرار بشأن من يُسمح له بالانضمام كعميل يُتَّخذ لاحقاً على Railway
-    بناءً على خطة هذا الجهاز (انظر network_sync.py و server.py).
-    """
     global network_manager
     if network_manager:
-        return  # مُفعّل مسبقاً
+        return
     device_name = platform.node() or "جهاز غير مسمّى"
     network_manager = OrgNetworkManager(
         my_hwid=DEVICE_HWID,
@@ -318,7 +261,6 @@ def start_network_sync():
         local_port=SHARED_DB_PORT,
         device_name=device_name,
     )
-    # يعمل بخيط منفصل لأن الاكتشاف الأولي قد يستغرق ثوانٍ (DISCOVERY_TIMEOUT_SECONDS)
     threading.Thread(
         target=network_manager.start,
         kwargs={"on_state_change": on_network_state_change},
@@ -326,46 +268,24 @@ def start_network_sync():
     ).start()
 
 
-
 def get_chroma_client():
-    """
-    يرجع عميل chromadb مناسب حسب دور هذا الجهاز الحالي:
-    - Host أو Standalone: قاعدة بيانات محلية فعلية (وهي نفسها التي تُقدَّم للشبكة).
-    - Client: اتصال HTTP بقاعدة بيانات الجهاز المضيف عبر الشبكة المحلية.
-    """
     with network_state_lock:
         role = current_network_state["role"]
         host_ip = current_network_state["host_ip"]
         host_port = current_network_state.get("host_port", SHARED_DB_PORT)
 
     if role == "client" and host_ip:
-        # جهاز عادي متصل بمضيف على الشبكة
         return chromadb.HttpClient(host=host_ip, port=host_port)
     elif role == "host":
-        # هذا الجهاز هو المضيف نفسه: يجب أن يتحدث مع سيرفر chromadb الذي
-        # يشغّله بنفسه عبر HTTP (localhost) بدلاً من فتح نفس ملف القاعدة
-        # مباشرة، لتفادي تعارض قفل الملف بين عمليتين (السيرفر + هذا الطلب).
         return chromadb.HttpClient(host="127.0.0.1", port=host_port)
     else:
-        # Standalone: لا يوجد ترخيص/شبكة مفعّلة بعد — قاعدة محلية بحتة مؤقتة
         return chromadb.PersistentClient(path=RAG_DB_DIR)
 
 
-# اسم نموذج التضمين (embedding) الذي يجب سحبه مسبقاً عبر Ollama.
-# nomic-embed-text خفيف (~274MB) ومخصص للتضمين، ويعمل بالكامل محلياً بدون إنترنت.
 OLLAMA_EMBEDDING_MODEL = os.environ.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
 
 
 class OllamaEmbeddingFunction:
-    """
-    دالة تضمين مخصّصة لـ chromadb تستخدم Ollama المحلي (عبر /api/embeddings)
-    بدل دالة chromadb الافتراضية (ONNXMiniLM_L6_V2)، التي تحاول تحميل
-    نموذجها من الإنترنت (chroma-onnx-models.s3.amazonaws.com) عند أول استخدام.
-    هذا يكسر مبدأ العمل بدون اتصال بالإنترنت الذي يقوم عليه التطبيق بالكامل.
-    يتطلب أن يكون نموذج OLLAMA_EMBEDDING_MODEL مسحوباً مسبقاً عبر:
-        ollama pull nomic-embed-text
-    """
-
     def __init__(self, model_name: str = OLLAMA_EMBEDDING_MODEL, base_url: str = "http://localhost:11434"):
         self.model_name = model_name
         self.base_url = base_url
@@ -374,7 +294,6 @@ class OllamaEmbeddingFunction:
         return f"ollama-{self.model_name}"
 
     def __call__(self, input):
-        # واجهة chromadb الحديثة تستدعي الدالة باسم بارامتر "input" (قائمة نصوص)
         texts = input if isinstance(input, list) else [input]
         embeddings = []
         with httpx.Client(timeout=60.0) as client:
@@ -389,8 +308,6 @@ class OllamaEmbeddingFunction:
 
 
 _ollama_embedding_function = OllamaEmbeddingFunction()
-
-
 
 
 # ---------------------------------------------------------
@@ -409,7 +326,7 @@ templates = Jinja2Templates(directory=templates_dir)
 
 
 # ---------------------------------------------------------
-# 5. نظام التتبع الحقيقي لتحميل نماذج الذكاء الاصطناعي (بدون تغيير)
+# 5. نظام التتبع الحقيقي
 # ---------------------------------------------------------
 download_status = {
     "flash": {"status": "idle", "progress": 0},
@@ -462,11 +379,6 @@ async def get_model_progress(model: str):
 
 @app.get("/api/models/installed")
 async def get_installed_models():
-    """
-    يستعلم فعلياً عن Ollama (عبر /api/tags) لمعرفة أي من نماذجنا
-    (flash/plus/pro) مثبت فعلياً على هذا الجهاز، بدل افتراض أي شيء
-    مسبقاً بالواجهة الأمامية.
-    """
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get("http://localhost:11434/api/tags")
@@ -479,7 +391,6 @@ async def get_installed_models():
     installed_actual_names = {m.get("name") for m in data.get("models", [])}
     installed_keys = [
         key for key, actual_name in OLLAMA_MODELS.items()
-        # Ollama قد يرجع الاسم مع أو بدون لاحقة ":latest" حسب الإصدار
         if actual_name in installed_actual_names or f"{actual_name}:latest" in installed_actual_names
     ]
     return {"installed": installed_keys}
@@ -493,30 +404,12 @@ class BrowserRequest(BaseModel):
 
 
 def open_browser_reliably(url: str) -> bool:
-    """
-    يفتح رابطاً بالمتصفح الافتراضي، ويرجع حالة نجاح حقيقية (وليس افتراضاً
-    أعمى). هذا ضروري لأن PyInstaller (--onefile) على لينكس تحديداً يضبط
-    مؤقتاً متغير بيئة LD_LIBRARY_PATH ليشير لمكتبات مضمَّنة داخل الحزمة
-    نفسها أثناء تشغيل التطبيق. هذا يعمل صحيحاً للتطبيق نفسه، لكنه يكسر
-    غالباً أي عملية خارجية (subprocess) يُطلقها التطبيق — مثل المتصفح —
-    لأن المتصفح الخارجي يحاول تحميل مكتباته الخاصة (GTK, glib, إلخ) لكنه
-    يجد بدلاً منها نسخاً مضمَّنة داخل حزمة PyInstaller غير متوافقة معه،
-    فيفشل الإطلاق بصمت دون رفع أي استثناء يلتقطه webbrowser.open().
-
-    الحل: ننظّف نسخة من متغيرات البيئة (خاصة LD_LIBRARY_PATH) قبل تشغيل
-    المتصفح كعملية منفصلة تماماً، حتى يستخدم مكتبات النظام الحقيقية بدل
-    مكتبات PyInstaller المضمَّنة.
-    """
-    # بيئة نظيفة للعملية الفرعية: نحذف LD_LIBRARY_PATH الذي يضبطه PyInstaller
-    # مؤقتاً (يظهر عادة كـ _MEIPASS أو مسار مؤقت يحتوي على مكتبات الحزمة)
     clean_env = os.environ.copy()
     clean_env.pop("LD_LIBRARY_PATH", None)
-    # PyInstaller أحياناً يحفظ القيمة الأصلية هنا قبل الكتابة فوقها؛ نستعيدها إن وُجدت
     original_ld_path = os.environ.get("LD_LIBRARY_PATH_ORIG")
     if original_ld_path:
         clean_env["LD_LIBRARY_PATH"] = original_ld_path
 
-    # محاولة 1: أوامر النظام المباشرة (الأكثر موثوقية على لينكس تحديداً)
     if platform.system() == "Linux":
         for opener in ("xdg-open", "gio", "gnome-open", "kde-open"):
             try:
@@ -541,12 +434,11 @@ def open_browser_reliably(url: str) -> bool:
 
     elif platform.system() == "Windows":
         try:
-            os.startfile(url)  # noqa: available on Windows only
+            os.startfile(url) 
             return True
         except Exception:
             pass
 
-    # محاولة 2 (احتياط أخير): webbrowser القياسية، بنفس البيئة النظيفة
     try:
         old_ld_path = os.environ.get("LD_LIBRARY_PATH")
         if "LD_LIBRARY_PATH" in clean_env:
@@ -562,30 +454,11 @@ def open_browser_reliably(url: str) -> bool:
         return False
 
 
-@app.post("/api/open-external")
-async def open_external_link(req: BrowserRequest):
-    success = open_browser_reliably(req.url)
-    if not success:
-        raise HTTPException(
-            status_code=500,
-            detail="تعذّر فتح المتصفح تلقائياً. افتح هذا الرابط يدوياً: " + req.url,
-        )
-    return {"status": "opened"}
-
-
-# عنوان صفحة الدفع الخارجية. بما أنها تُخدَّم من نفس خادم Railway (عبر
-# endpoint /checkout في server.py)، تُبنى تلقائياً من LICENSE_SERVER_URL —
-# لا حاجة لضبط متغير بيئة منفصل إلا إذا نقلت صفحة الدفع لاستضافة أخرى مستقبلاً.
 CHECKOUT_PAGE_URL = os.environ.get("CHECKOUT_PAGE_URL", f"{LICENSE_SERVER_URL}/checkout")
 
 
 @app.post("/api/subscribe/open-checkout")
 async def open_checkout(plan: str):
-    """
-    يفتح صفحة الدفع الخارجية في متصفح المستخدم، مع تمرير hwid هذا الجهاز
-    والخطة المطلوبة كـ query params حتى تعرف صفحة الدفع لأي جهاز تُصدر
-    order_id بعد نجاح الدفع عبر PayPal (تُستخدم لاحقاً في /api/subscribe/verify).
-    """
     checkout_url = f"{CHECKOUT_PAGE_URL}?hwid={DEVICE_HWID}&plan={plan}"
     success = open_browser_reliably(checkout_url)
     if not success:
@@ -603,67 +476,41 @@ def read_root(request: Request):
 
 
 # ---------------------------------------------------------
-# 7. الاشتراك المباشر عبر PayPal (بدون أي مفتاح نصي)
+# 7. الاشتراك المباشر
 # ---------------------------------------------------------
 class VerifyOrderRequest(BaseModel):
     order_id: str
-    plan: str  # مثال: "pro_monthly", "pro_yearly", "ultra_monthly", "ultra_yearly"
+    plan: str
 
 
 @app.post("/api/subscribe/verify")
 async def subscribe_verify_api(data: VerifyOrderRequest):
-    """
-    يُستدعى بعد أن يتم المستخدم عملية الدفع عبر PayPal داخل المتصفح
-    (نافذة خارجية تُفتح عبر /api/subscribe/open-checkout). التحقق الفعلي
-    من صحة الدفع يحدث على Railway، وهو من يُفعّل الاشتراك المرتبط بـ HWID
-    هذا الجهاز تحديداً — لا يُدخل المستخدم أي مفتاح نصي في أي خطوة.
-    """
     device_name = platform.node() or "جهاز غير مسمّى"
     result = await verify_paypal_order_with_server(data.order_id, DEVICE_HWID, data.plan, device_name)
-
     if result.get("success"):
         start_network_sync()
-
     return result
 
 
 @app.post("/api/trial/start")
 async def trial_start_api():
-    """
-    يُستدعى من الواجهة عند أول تشغيل للتطبيق (قبل أي دفع)، لبدء تجربة
-    مجانية 7 أيام بصلاحيات Ultra كاملة. Railway هو من يقرر إن كان هذا
-    الجهاز (hwid) قد استخدم تجربته من قبل أم لا؛ هذا الـ endpoint لا
-    يستطيع منح تجربة ثانية بأي حال حتى لو استُدعي عدة مرات.
-    """
     device_name = platform.node() or "جهاز غير مسمّى"
     result = await start_free_trial_with_server(DEVICE_HWID, device_name)
-
     if result.get("success"):
         start_network_sync()
-
     return result
 
 
 @app.get("/api/check-license")
 async def check_license_api():
-    """يُستدعى دورياً من الواجهة الأمامية للتحقق من حالة الترخيص الحالية."""
     result = await verify_license_with_server(DEVICE_HWID)
-
-    # إذا كان الترخيص صالحاً ولم تُفعَّل مزامنة الشبكة بعد (مثلاً بعد إعادة تشغيل التطبيق)
     if result.get("valid") and network_manager is None:
         start_network_sync()
-
     return result
-
 
 
 @app.get("/health")
 def health_check():
-    """
-    يُستخدم من قبل أجهزة أخرى على الشبكة للتحقق من توفر هذا الجهاز
-    (كمضيف محتمل) ومعرفة هويته (hwid) قبل محاولة الانضمام إليه رسمياً
-    عبر Railway. لا يكشف أي معلومة حساسة، فقط hwid ودور هذا الجهاز الحالي.
-    """
     with network_state_lock:
         role = current_network_state["role"]
     return {"status": "ok", "hwid": DEVICE_HWID, "role": role}
@@ -671,7 +518,6 @@ def health_check():
 
 @app.get("/api/network-status")
 def network_status_api():
-    """تعرض حالة الاتصال الحالية بالشبكة (Host/Client/Standalone) للواجهة."""
     with network_state_lock:
         return dict(current_network_state)
 
@@ -683,11 +529,6 @@ class ConnectManualRequest(BaseModel):
 
 @app.post("/api/network-connect-manual")
 def network_connect_manual(data: ConnectManualRequest):
-    """
-    خيار احتياطي لإدخال IP الجهاز المضيف يدوياً، لحالات حجب mDNS
-    ببعض إعدادات الشبكات المؤسسية. يمر بنفس تحقق Railway الإلزامي
-    مثل الاكتشاف التلقائي تماماً — لا اختصار هنا أيضاً.
-    """
     if network_manager is None:
         raise HTTPException(status_code=400, detail="يجب أن يكون لديك اشتراك مفعّل أولاً")
     result = network_manager.connect_manually(data.host_ip, data.host_port)
@@ -703,7 +544,11 @@ def network_connect_manual(data: ConnectManualRequest):
 # 8. معالجة الملفات محلياً (RAG - Word, Excel, PDF)
 # ---------------------------------------------------------
 @app.post("/api/upload")
-async def upload_endpoint(files: List[UploadFile] = File(...)):
+async def upload_endpoint(hwid: str = Form(...), files: List[UploadFile] = File(...)):
+    # التحقق من أن الطلب وارد فعلاً من الجهاز المرخص بناءً على HWID
+    if hwid != DEVICE_HWID:
+        raise HTTPException(status_code=403, detail="Invalid Hardware ID")
+
     state = load_local_state()
     if not state.get("active"):
         raise HTTPException(status_code=403, detail="Unlicensed")
@@ -781,18 +626,10 @@ async def upload_endpoint(files: List[UploadFile] = File(...)):
 class ChatMessage(BaseModel):
     message: str
     model: str
+    hwid: str  # تمت إضافة التحقق من هوية الجهاز في المحادثات أيضاً
 
 
 def retrieve_context(query: str, n_results: int = RAG_N_RESULTS) -> dict:
-    """
-    يسترجع أقرب المقاطع من قاعدة المعرفة، ويطبّق فحصاً برمجياً على درجة
-    التشابه (distance) قبل اعتبار أي مقطع "سياقاً صالحاً".
-
-    يرجع dict فيها:
-      - context_text: النص الجاهز للحقن بالـ prompt (فارغ لو ما فيه نتائج كافية الصلة)
-      - has_context: هل فيه سياق صالح فعلاً (bool)
-      - sources: قائمة أسماء الملفات المستخدَمة فعلياً (للعرض/التتبع)
-    """
     empty_result = {"context_text": "", "has_context": False, "sources": []}
 
     if not CHROMA_AVAILABLE:
@@ -817,8 +654,6 @@ def retrieve_context(query: str, n_results: int = RAG_N_RESULTS) -> dict:
     if not documents:
         return empty_result
 
-    # الفحص البرمجي: نستبعد أي مقطع تجاوزت مسافته الحد الأقصى المسموح
-    # (أي تشابه ضعيف رياضياً مع السؤال)، بدل ما نثق فقط بتعليمة النموذج النصية.
     accepted_chunks = []
     sources = []
     for doc, meta, dist in zip(documents, metadatas, distances):
@@ -842,21 +677,19 @@ def retrieve_context(query: str, n_results: int = RAG_N_RESULTS) -> dict:
 
 @app.post("/api/chat")
 async def chat_endpoint(data: ChatMessage):
+    # التحقق من أن الطلب وارد فعلاً من الجهاز المرخص بناءً على HWID
+    if data.hwid != DEVICE_HWID:
+        raise HTTPException(status_code=403, detail="Invalid Hardware ID")
+
     state = load_local_state()
     if not state.get("active"):
         raise HTTPException(status_code=403, detail="Unlicensed")
 
     actual_name = OLLAMA_MODELS.get(data.model, "qwen2.5:1.5b")
 
-    # سحب بيانات الشركة من قاعدة المعرفة المشتركة (محلية إن كنا Host، أو عبر الشبكة إن كنا Client)
-    # مع فحص برمجي لمدى الصلة قبل إرسال أي شيء للنموذج أصلاً.
     retrieval = retrieve_context(data.message)
 
     if not retrieval["has_context"]:
-        # لا يوجد سياق كافٍ من أرشيف الشركة (إما القاعدة فارغة، أو لا يوجد
-        # مقطع ذو صلة كافية بالسؤال). هذا لا يعني أن السؤال خاطئ أو أن
-        # المستخدم يطلب بيانات شركة — قد يكون سؤالاً عاماً أو تعريفياً بسيطاً.
-        # نسمح للنموذج بالرد كمساعد عام طبيعي، دون أي ذكر للأرشيف أو المصادر.
         general_system_prompt = """أنت 'مستشار Nexus'، المساعد الذكي المحلي للشركة (يعمل بالكامل دون اتصال بالإنترنت).
 لا تتوفر لديك حالياً أي مقاطع من أرشيف الشركة ذات صلة بهذا السؤال، لذا أجب بشكل طبيعي ومباشر باستخدام معرفتك العامة وقدراتك كمساعد محادثة.
 لا تذكر أرشيف الشركة أو المصادر أو أي عبارة تفيد بعدم توفر معلومات، إلا إذا كان السؤال يتطلب صراحةً بيانات داخلية للشركة لا تملكها فعلاً.
@@ -919,7 +752,6 @@ async def chat_endpoint(data: ChatMessage):
 # 10. تشغيل السيرفر والواجهة المكتبيّة
 # ---------------------------------------------------------
 def find_free_port(preferred=8000):
-    """يتحقق إن كان البورت المفضل مشغولاً، ويرجع أول بورت متاح بدءاً منه."""
     for port in range(preferred, preferred + 20):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if s.connect_ex(("127.0.0.1", port)) != 0:
@@ -935,7 +767,6 @@ def start_fastapi():
 
 
 def resume_network_sync_if_licensed():
-    """عند إقلاع التطبيق: إذا كان هناك ترخيص مفعّل مسبقاً (كاش محلي)، أعد تفعيل مزامنة الشبكة تلقائياً."""
     state = load_local_state()
     if state.get("active") and state.get("hwid") == DEVICE_HWID:
         start_network_sync()
