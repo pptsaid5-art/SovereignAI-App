@@ -5,12 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sovereign AI - Enterprise Node</title>
 
-    <!-- الملفات المحلية فقط لضمان عمل الواجهة 100% بدون إنترنت (Offline Mode) -->
     <script src="/static/tailwind.min.js"></script>
     <link rel="stylesheet" href="/static/material-symbols-rounded.css" />
 
     <style>
-        /* خط Cairo محلي بدل الاستيراد من fonts.googleapis.com */
         @font-face {
             font-family: 'Cairo';
             src: url('/static/fonts/cairo.woff2') format('woff2');
@@ -44,7 +42,6 @@
 
         .font-term { font-family: ui-monospace, 'SFMono-Regular', 'Consolas', monospace; }
 
-        /* خلفية بنسيج شبكي دقيق جداً — تلمّح للوحة تحكم/مخطط هندسي بدون ضجيج بصري */
         .grid-texture {
             background-image:
                 linear-gradient(var(--border-hair) 1px, transparent 1px),
@@ -76,7 +73,6 @@
             background: rgba(255, 138, 30, 0.06);
         }
 
-        /* توهج كهرماني دقيق بدل التوهج البنفسجي/الأزرق النمطي */
         .lock-glow { box-shadow: 0 0 80px rgba(255, 138, 30, 0.08), 0 0 0 1px var(--border-hair); }
 
         ::-webkit-scrollbar { width: 5px; }
@@ -89,7 +85,6 @@
             background: rgba(74, 222, 128, 0.05) !important;
         }
 
-        /* شريط مسح دقيق — العلامة المميزة للتصميم، تظهر فقط على شاشة القفل */
         @keyframes scanline {
             0% { transform: translateY(-100%); }
             100% { transform: translateY(100%); }
@@ -103,7 +98,6 @@
             pointer-events: none;
         }
 
-        /* نبضة حالة الاتصال — بديل عن نقطة الوميض العادية */
         @keyframes pulseLine {
             0%, 100% { opacity: 0.3; transform: scaleY(0.4); }
             50% { opacity: 1; transform: scaleY(1); }
@@ -150,8 +144,8 @@
     <div id="strict-lock-screen" class="fixed inset-0 z-[100] flex items-center justify-center transition-opacity duration-500 opacity-0 pointer-events-none hidden" style="background: rgba(6,8,10,0.97); backdrop-filter: blur(24px);">
         <div class="border rounded-2xl p-8 max-w-2xl w-full shadow-2xl lock-glow relative overflow-hidden transform scale-95 transition-transform duration-500 scanline" id="lock-modal-content" style="background: var(--bg-panel); border-color: var(--border-hair);">
 
-            <!-- ============ شاشة التجربة المجانية (تظهر أولاً لجهاز جديد لم يستخدم تجربته بعد) ============ -->
-            <div id="trial-offer-screen">
+            <!-- ============ شاشة التجربة المجانية ============ -->
+            <div id="trial-offer-screen" class="hidden">
                 <div class="text-center mb-7 relative z-10">
                     <div class="w-14 h-14 rounded-xl border flex items-center justify-center mx-auto mb-5 relative" style="background: var(--bg-void); border-color: var(--border-hair-lit);">
                         <span class="material-symbols-rounded text-3xl" style="color: var(--amber);">rocket_launch</span>
@@ -188,7 +182,7 @@
                 </button>
             </div>
 
-            <!-- ============ شاشة الخطط والدفع (تظهر بعد انتهاء التجربة، أو لجهاز استخدمها من قبل) ============ -->
+            <!-- ============ شاشة الخطط والدفع ============ -->
             <div id="plans-screen" class="hidden">
                 <div class="text-center mb-6 relative z-10">
                     <div class="w-14 h-14 rounded-xl border flex items-center justify-center mx-auto mb-5 relative" style="background: var(--bg-void); border-color: var(--border-hair-lit);">
@@ -199,7 +193,6 @@
                     <p class="text-sm max-w-md mx-auto leading-relaxed" data-i18n="locked_desc" style="color: var(--text-dim);">اختر خطة لتفعيل هذا الجهاز فوراً — الاشتراك مرتبط بهذا الجهاز مباشرة، بدون أي مفتاح تُدخله.</p>
                 </div>
 
-                <!-- زر تبديل شهري / سنوي -->
                 <div class="flex items-center justify-center gap-3 mb-5 relative z-10">
                     <span class="text-xs font-bold" id="billing-label-monthly" style="color: var(--text-primary);" data-i18n="billing_monthly">شهري</span>
                     <button onclick="toggleBillingPeriod()" id="billing-toggle" class="relative w-12 h-6 rounded-full transition-colors" style="background: var(--border-hair-lit);">
@@ -212,7 +205,6 @@
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 relative z-10">
-                    <!-- خطة Pro -->
                     <div class="plan-card border rounded-xl p-4 flex flex-col cursor-pointer transition-all selected" data-plan-base="pro" onclick="selectPlan(this)" style="background: var(--bg-void); border-color: var(--border-hair);">
                         <div class="label-eyebrow mb-1" style="color: var(--amber);" data-i18n="plan_pro_name">Pro</div>
                         <div class="text-lg font-bold mb-1" style="color: var(--text-primary);">
@@ -221,7 +213,6 @@
                         <div class="text-[11px] leading-relaxed mb-3" style="color: var(--text-dim);" data-i18n="plan_pro_desc">شارك مع حتى 5 أجهزة بنفس مكتبك (LAN)</div>
                         <span class="material-symbols-rounded text-base mt-auto" style="color: var(--amber);">check_circle</span>
                     </div>
-                    <!-- خطة Ultra -->
                     <div class="plan-card border rounded-xl p-4 flex flex-col cursor-pointer transition-all" data-plan-base="ultra" onclick="selectPlan(this)" style="background: var(--bg-void); border-color: var(--border-hair);">
                         <div class="label-eyebrow mb-1" data-i18n="plan_ultra_name">Ultra</div>
                         <div class="text-lg font-bold mb-1" style="color: var(--text-primary);">
@@ -321,7 +312,7 @@
                 <div class="w-16 h-16 rounded-2xl border flex items-center justify-center mb-6 mx-auto relative" style="background: var(--bg-panel); border-color: var(--border-hair);">
                     <span class="material-symbols-rounded text-4xl" style="color: var(--amber);">corporate_fare</span>
                 </div>
-                <h2 class="text-xl font-bold mb-2" id="welcome-model-name" style="color: var(--text-primary);">مستشار Nexus 1 Flash جاهز للعمل</h2>
+                <h2 class="text-xl font-bold mb-2" id="welcome-model-name" style="color: var(--text-primary);">مستشار Nexus جاهز للعمل</h2>
                 <p class="text-sm max-w-md mx-auto leading-relaxed" data-i18n="welcome_desc" style="color: var(--text-dim);">الخادم المحلي جاهز للتحليل. قم بإرفاق ملفات الشركة أو الاستعلام المباشر لاستخراج النتائج بسرية تامة.</p>
             </div>
         </div>
@@ -360,7 +351,6 @@
 
             <div class="overflow-y-auto pr-2 space-y-3 flex-1">
 
-                <!-- Model: Flash -->
                 <div id="card-flash" class="border p-5 rounded-xl flex items-center justify-between transition-all model-active-card" style="background: var(--bg-void); border-color: var(--border-hair);">
                     <div class="flex items-center gap-4">
                         <span class="material-symbols-rounded text-2xl" style="color: var(--green);">bolt</span>
@@ -375,7 +365,6 @@
                     </button>
                 </div>
 
-                <!-- Model: Plus -->
                 <div id="card-plus" class="border p-5 rounded-xl flex items-center justify-between transition-all" style="background: var(--bg-void); border-color: var(--border-hair);">
                     <div class="flex items-center gap-4">
                         <span class="material-symbols-rounded text-2xl" style="color: var(--text-dim);">psychology</span>
@@ -390,7 +379,6 @@
                     </button>
                 </div>
 
-                <!-- Model: Pro -->
                 <div id="card-pro" class="border p-5 rounded-xl flex items-center justify-between transition-all" style="background: var(--bg-void); border-color: var(--border-hair);">
                     <div class="flex items-center gap-4">
                         <span class="material-symbols-rounded text-2xl" style="color: var(--text-dim);">diamond</span>
@@ -427,7 +415,6 @@
             <p class="text-xs mb-6 -mt-3" style="color: var(--text-dim);" data-i18n="network_subtitle">مزامنة تلقائية عبر شبكة المكتب — بدون إنترنت</p>
 
             <div class="overflow-y-auto pr-2 space-y-4 flex-1">
-                <!-- حالة الدور الحالي (Host / Client / Standalone) -->
                 <div class="rounded-xl p-5 border" style="background: var(--bg-void); border-color: var(--border-hair);">
                     <div class="flex items-center justify-between mb-3">
                         <span class="label-eyebrow" data-i18n="current_role">دور هذا الجهاز</span>
@@ -444,7 +431,6 @@
                     </div>
                 </div>
 
-                <!-- خيار الاتصال اليدوي (احتياطي) -->
                 <div class="rounded-xl p-5 border" style="background: var(--bg-void); border-color: var(--border-hair);">
                     <div class="text-xs font-bold mb-3 flex items-center gap-2" style="color: var(--text-dim);">
                         <span class="material-symbols-rounded text-base">settings_ethernet</span>
@@ -472,7 +458,6 @@
     </div>
 
     <script>
-        /* --- Translation & Localization System --- */
         const translations = {
             ar: {
                 locked_eyebrow: "التحكم بالوصول",
@@ -638,12 +623,7 @@
             applyLanguage();
         }
 
-        /* --- نظام التتبع الحقيقي لتحميل النماذج من Ollama --- */
-        // لا نفترض أي نموذج "نشط" مسبقاً — activeModel يبقى فارغاً حتى تتأكد
-        // refreshInstalledModels() فعلياً من وجود نموذج مثبت على الجهاز.
         let activeModel = null;
-        // لا نفترض أي نموذج مثبت مسبقاً — نتحقق فعلياً من Ollama عبر
-        // refreshInstalledModels() عند بدء التطبيق (انظر DOMContentLoaded بالأسفل).
         let installedModels = [];
 
         async function refreshInstalledModels() {
@@ -652,14 +632,11 @@
                 if (response.ok) {
                     const data = await response.json();
                     installedModels = data.installed || [];
-                    // إن لم يكن هناك نموذج "نشط" محدد فعلياً، أو كان النموذج
-                    // النشط الحالي غير مثبت بالواقع، نختار أول نموذج مثبت فعلياً
                     if (!activeModel || !installedModels.includes(activeModel)) {
                         activeModel = installedModels.length > 0 ? installedModels[0] : null;
                     }
                 }
             } catch (e) {
-                // لو فشل الاستعلام (مثلاً Ollama لم يبدأ بعد)، نترك القائمة كما هي
                 console.error('Failed to refresh installed models:', e);
             }
             updateModelsUI();
@@ -735,7 +712,6 @@
             });
         }
 
-        // قراءة النسبة الحقيقية للتحميل من الباكيند كل ثانيتين
         function checkActualDownloadProgress(modelKey) {
             const btn = document.getElementById(`btn-${modelKey}`);
             btn.disabled = true;
@@ -766,13 +742,8 @@
             }, 2000);
         }
 
-        /* --- النظام الأساسي والدفع الذكي --- */
         let isSystemLocked = true;
-
-        // الـ HWID الحقيقي يأتي من الخادم المحلي (Python)، وليس مولّداً عشوائياً
-        // بالمتصفح — هذا يضمن ارتباطه فعلياً بهذا الجهاز تحديداً.
         const machineId = "{{ hwid }}";
-
         let networkPollInterval = null;
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -780,8 +751,6 @@
             checkLocalLicense();
             refreshInstalledModels();
 
-            // فحص دوري لحالة الترخيص (يسمح باكتشاف انتهاء الاشتراك، وأيضاً
-            // بفتح النظام تلقائياً لو المستخدم فعّل المفتاح من نافذة أخرى)
             setInterval(() => {
                 checkLocalLicense(true);
             }, 15000);
@@ -806,24 +775,37 @@
                 const res = await fetch(`/api/check-license`);
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.valid) { unlockSystem(data); return; }
-                    if(!silent) lockSystem(data);
-                    return;
+                    if (data.valid) { 
+                        unlockSystem(data); 
+                        return; 
+                    } else {
+                        // تعديل الأمان: إذا أرجع السيرفر صراحة أن الرخصة غير صالحة، اقفل الشاشة فوراً
+                        lockSystem(data);
+                        return;
+                    }
                 }
                 if(!silent) lockSystem({});
-            } catch (e) { if(!silent) lockSystem({}); }
+            } catch (e) { 
+                if(!silent) lockSystem({}); 
+            }
         }
 
         function lockSystem(licenseData = {}) {
             isSystemLocked = true;
             const lockModal = document.getElementById('strict-lock-screen');
             const content = document.getElementById('lock-modal-content');
+            
+            // التأكد من ظهور القفل
             lockModal.classList.remove('hidden');
-            setTimeout(() => { lockModal.classList.add('modal-active'); content.classList.replace('scale-95', 'scale-100'); }, 50);
+            setTimeout(() => { 
+                lockModal.classList.add('modal-active'); 
+                content.classList.replace('scale-95', 'scale-100'); 
+            }, 50);
+            
             if (networkPollInterval) { clearInterval(networkPollInterval); networkPollInterval = null; }
 
-            // جهاز لم يستخدم تجربته المجانية بعد → شاشة التجربة أولاً.
-            // جهاز استخدمها من قبل (أو انتهت للتو) → شاشة الخطط مباشرة.
+            // تحديد أيهما يظهر: التجربة المجانية أم شاشة الدفع
+            // إذا كان السيرفر أرجع trial_available = true يظهر زر التجربة، عدا ذلك يظهر الدفع
             if (licenseData.trial_available) {
                 showTrialScreen();
             } else {
@@ -848,7 +830,6 @@
             startNetworkPolling();
         }
 
-        // --- التبديل بين شاشة التجربة المجانية وشاشة الخطط ---
         function showTrialScreen() {
             document.getElementById('trial-offer-screen').classList.remove('hidden');
             document.getElementById('plans-screen').classList.add('hidden');
@@ -859,7 +840,6 @@
             document.getElementById('plans-screen').classList.remove('hidden');
         }
 
-        // --- بدء التجربة المجانية (7 أيام Ultra، بدون أي دفع) ---
         async function startFreeTrial() {
             const errorEl = document.getElementById('trial-error');
             const btn = document.getElementById('trial-btn');
@@ -888,11 +868,9 @@
             }
         }
 
-        // --- اختيار الخطة وفترة الفوترة (شهري/سنوي)، ثم الاشتراك المباشر ---
-        let selectedPlanBase = 'pro';   // 'pro' أو 'ultra'
-        let selectedBillingPeriod = 'monthly'; // 'monthly' أو 'yearly'
+        let selectedPlanBase = 'pro';
+        let selectedBillingPeriod = 'monthly';
 
-        // الأسعار الفعلية بالدولار لكل خطة وفترة فوترة
         const PLAN_PRICES = {
             pro: { monthly: 149, yearly: 1499 },
             ultra: { monthly: 499, yearly: 4999 },
@@ -927,7 +905,6 @@
             const yearlyLabel = document.getElementById('billing-label-yearly');
             const isYearly = selectedBillingPeriod === 'yearly';
 
-            // نقطة التبديل: يمين لو سنوي (RTL-aware عبر tailwind rtl:/ltr: على العنصر نفسه بالـ HTML)
             dot.style.transform = isYearly ? 'translateX(calc(-100% - 0.5rem))' : 'translateX(0)';
             if (document.documentElement.dir === 'ltr') {
                 dot.style.transform = isYearly ? 'translateX(calc(100% + 0.5rem))' : 'translateX(0)';
@@ -946,11 +923,6 @@
             });
         }
 
-        // يفتح صفحة الدفع الخارجية في المتصفح، مع تمرير hwid هذا الجهاز والخطة
-        // المختارة (تجمع بين الخطة الأساسية وفترة الفوترة، مثل pro_monthly أو
-        // ultra_yearly) كـ query params. الدفع والتحقق يحدثان بالكامل على الخادم
-        // (Railway)، ولا يعتمد التطبيق أبداً على أي حالة "نجاح" يُبلَّغ بها
-        // من الواجهة الأمامية نفسها أو من صفحة الدفع مباشرة.
         async function startCheckout() {
             const errorEl = document.getElementById('checkout-error');
             const btn = document.getElementById('checkout-btn');
@@ -972,13 +944,11 @@
                         ? 'فُتحت صفحة الدفع في متصفحك. بعد إتمام الدفع، اضغط "تحقق الآن" هنا.'
                         : 'Checkout page opened in your browser. After payment, click "Check Now" here.', 'success');
                 } else {
-                    // الخادم لم يستطع فتح المتصفح فعلياً (مثلاً بيئة بدون متصفح افتراضي
-                    // واضح). نعرض الرابط نفسه حتى يفتحه المستخدم يدوياً بدل فشل صامت.
                     let detail = translations[currentLang].toast_error;
                     try {
                         const data = await res.json();
                         if (data.detail) detail = data.detail;
-                    } catch (parseErr) { /* تجاهل، نستخدم الرسالة الافتراضية */ }
+                    } catch (parseErr) { }
                     errorEl.textContent = detail;
                     errorEl.classList.remove('hidden');
                 }
@@ -991,14 +961,11 @@
             }
         }
 
-        // زر احتياطي: بعد إتمام الدفع بالمتصفح، المستخدم يرجع للتطبيق ويضغط
-        // هذا الزر لتحديث حالة الترخيص فوراً بدل انتظار الفحص الدوري (كل 15 ثانية).
         async function recheckLicenseManually() {
             showToast(currentLang === 'ar' ? 'جاري التحقق من حالة الاشتراك...' : 'Checking subscription status...', 'success');
             await checkLocalLicense();
         }
 
-        /* --- شبكة المؤسسة (Network Center) --- */
         function openNetworkModal() {
             const modal = document.getElementById('network-modal');
             modal.classList.remove('hidden');
@@ -1025,7 +992,6 @@
                 const data = await res.json();
                 renderNetworkStatus(data);
             } catch (e) {
-                // فشل صامت — الشبكة ستحاول مجدداً بالدورة التالية
             }
         }
 
@@ -1108,7 +1074,6 @@
             }
         }
 
-        /* --- API Integrations: Upload & Chat --- */
         async function handleFileUpload(event) {
             if (isSystemLocked) return;
             const files = event.target.files;
@@ -1171,8 +1136,6 @@
             }
         }
 
-        // sources: مصفوفة اختيارية بأسماء الملفات المصدرية (من endpoint الجديد في app.py)
-        // تُعرض كوسوم صغيرة أسفل رد النظام حتى يقدر الموظف يتحقق بنفسه من أصل المعلومة.
         function appendMessage(text, sender, sources) {
             const container = document.getElementById('chat-container');
             const div = document.createElement('div');
@@ -1188,14 +1151,13 @@
                     const tags = sources.map(s => `<span class="source-tag px-2 py-1 rounded-md">${s}</span>`).join(' ');
                     sourcesHtml = `<div class="flex flex-wrap items-center gap-1.5 mt-3 pt-3" style="border-top: 1px solid var(--border-hair);"><span class="label-eyebrow">${label}:</span>${tags}</div>`;
                 }
-                div.innerHTML = `<div class="p-5 rounded-2xl rtl:rounded-tr-sm ltr:rounded-tl-sm text-[15px] leading-relaxed max-w-2xl break-words whitespace-pre-wrap border-s-2" style="background: var(--bg-panel); border-color: var(--border-hair); border-inline-start-color: var(--amber); color: var(--text-primary);">${text}${sourcesHtml}</div>`;
+                div.innerHTML = `<div class="p-5 rounded-2xl rtl:rounded-tr-sm ltr:rounded-tl-sm text-[15px] leading-relaxed max-w-2xl break-words whitespace-pre-wrap border-s-2 overflow-x-auto" style="background: var(--bg-panel); border-color: var(--border-hair); border-inline-start-color: var(--amber); color: var(--text-primary);">${text}${sourcesHtml}</div>`;
             }
 
             container.appendChild(div);
             container.scrollTop = container.scrollHeight;
         }
 
-        // إضافة حماية: منع فتح مركز الشبكة قبل تفعيل الترخيص
         const _originalOpenNetworkModal = openNetworkModal;
         openNetworkModal = function() {
             if (isSystemLocked) return;
