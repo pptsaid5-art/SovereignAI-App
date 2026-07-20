@@ -12,7 +12,6 @@ import subprocess
 import httpx
 import webbrowser
 from typing import List, Optional
-# تمت إضافة Form هنا لاستقبال الـ hwid في الرفع
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request, Form
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
@@ -115,6 +114,7 @@ async def verify_license_with_server(hwid: str) -> dict:
                 "last_verified_at": time.time(),
             })
             save_local_state(state)
+            
             return {
                 "valid": data.get("valid", False),
                 "plan": data.get("plan"),
@@ -124,7 +124,7 @@ async def verify_license_with_server(hwid: str) -> dict:
                 "source": "server",
             }
         else:
-            return {"valid": False, "plan": None, "source": "server_rejected"}
+            return {"valid": False, "plan": None, "trial_available": False, "source": "server_rejected"}
 
     except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError):
         if state.get("hwid") == hwid and state.get("active"):
@@ -136,9 +136,10 @@ async def verify_license_with_server(hwid: str) -> dict:
                     "plan": state.get("plan"),
                     "expires_at": state.get("expires_at"),
                     "lan_device_limit": state.get("lan_device_limit"),
+                    "trial_available": False,
                     "source": "offline_cache",
                 }
-        return {"valid": False, "plan": None, "source": "no_cache_or_expired"}
+        return {"valid": False, "plan": None, "trial_available": False, "source": "no_cache_or_expired"}
 
 
 async def verify_paypal_order_with_server(order_id: str, hwid: str, plan: str, device_name: str) -> dict:
@@ -626,7 +627,7 @@ async def upload_endpoint(hwid: str = Form(...), files: List[UploadFile] = File(
 class ChatMessage(BaseModel):
     message: str
     model: str
-    hwid: str  # تمت إضافة التحقق من هوية الجهاز في المحادثات أيضاً
+    hwid: str  # التحقق من هوية الجهاز في المحادثات
 
 
 def retrieve_context(query: str, n_results: int = RAG_N_RESULTS) -> dict:
