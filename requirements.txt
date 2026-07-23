@@ -16,3 +16,4 @@ PyQtWebEngine==5.15.6
 pypdf==4.2.0
 zeroconf
 jaraco.collections
+beautifulsoup4
