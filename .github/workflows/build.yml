@@ -247,6 +247,81 @@ jobs:
             --icon="app_icon.icns" app.py
 
       # ===================================================
+      # فحص سلامة الملف التنفيذي (Sanity Check) — لكل منصة على
+      # runner الخاص بها فوراً بعد البناء. هذا لا يشغّل نافذة GUI
+      # فعلية (pywebview يحتاج شاشة/عرض غير متوفر على CI runner)،
+      # لكنه يتأكد أن الملف:
+      # 1. تكوّن فعلاً وموجود بالمسار المتوقع
+      # 2. حجمه معقول (ليس فارغاً أو تالفاً من فشل صامت بالبناء)
+      # 3. نوعه الحقيقي صحيح (PE32+ لويندوز، Mach-O لماك، ELF للينكس)
+      # لو أي فحص فشل، الخطوة توقف الـ workflow بخطأ بدل ما ترفع
+      # ملف تالف كـ "ناجح" بدون تنبيه.
+      # ===================================================
+      - name: Sanity Check Executable (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          FILE_PATH="dist/${{ env.APP_NAME }}"
+          if [ ! -f "$FILE_PATH" ]; then
+            echo "::error::Executable not found at $FILE_PATH"
+            exit 1
+          fi
+          FILE_SIZE=$(stat -c%s "$FILE_PATH")
+          echo "Executable size: ${FILE_SIZE} bytes"
+          if [ "$FILE_SIZE" -lt 10000000 ]; then
+            echo "::error::Executable size looks too small (${FILE_SIZE} bytes) — build may have failed silently."
+            exit 1
+          fi
+          file "$FILE_PATH"
+          file "$FILE_PATH" | grep -qi "ELF" || { echo "::error::File is not a valid ELF executable"; exit 1; }
+          chmod +x "$FILE_PATH"
+          echo "✅ Linux executable passed sanity checks."
+
+      - name: Sanity Check Executable (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $FilePath = "dist\${{ env.APP_NAME }}.exe"
+          if (-not (Test-Path $FilePath)) {
+            Write-Host "::error::Executable not found at $FilePath"
+            exit 1
+          }
+          $FileSize = (Get-Item $FilePath).Length
+          Write-Host "Executable size: $FileSize bytes"
+          if ($FileSize -lt 10000000) {
+            Write-Host "::error::Executable size looks too small ($FileSize bytes) — build may have failed silently."
+            exit 1
+          }
+          # تحقق من رأس ملف PE (يبدأ بـ 'MZ') للتأكد أنه ملف Windows تنفيذي صحيح
+          $bytes = [System.IO.File]::ReadAllBytes($FilePath)[0..1]
+          $header = [System.Text.Encoding]::ASCII.GetString($bytes)
+          if ($header -ne "MZ") {
+            Write-Host "::error::File does not have a valid PE (MZ) header — not a valid Windows executable."
+            exit 1
+          }
+          Write-Host "✅ Windows executable passed sanity checks."
+
+      - name: Sanity Check Executable (macOS)
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          FILE_PATH="dist/${{ env.APP_NAME }}"
+          if [ ! -f "$FILE_PATH" ]; then
+            echo "::error::Executable not found at $FILE_PATH"
+            exit 1
+          fi
+          FILE_SIZE=$(stat -f%z "$FILE_PATH")
+          echo "Executable size: ${FILE_SIZE} bytes"
+          if [ "$FILE_SIZE" -lt 10000000 ]; then
+            echo "::error::Executable size looks too small (${FILE_SIZE} bytes) — build may have failed silently."
+            exit 1
+          fi
+          file "$FILE_PATH"
+          file "$FILE_PATH" | grep -qi "Mach-O" || { echo "::error::File is not a valid Mach-O executable"; exit 1; }
+          chmod +x "$FILE_PATH"
+          echo "✅ macOS executable passed sanity checks."
+
+      # ===================================================
       # اختصار سطح المكتب — Linux فقط.
       #
       # ملاحظة إصلاح مهمة: النسخة السابقة استخدمت "%k" في حقول Exec/Icon،
