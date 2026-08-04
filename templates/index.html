@@ -378,6 +378,21 @@
                     <span id="pending-dot" class="hidden relative inline-flex rounded-full h-2 w-2" style="background: var(--amber);"></span>
                 </span>
             </button>
+
+            <!-- تواصل مع الدعم — يفتح تطبيق البريد الافتراضي على جهاز المستخدم -->
+            <a href="mailto:supportsovereignainode@gmail.com?subject=Sovereign%20AI%20Node%20-%20Support%20Request"
+               class="w-full mt-2.5 py-3.5 px-4 rounded-xl border transition-all flex items-center justify-between group"
+               style="background: var(--bg-void); border-color: var(--border-hair); text-decoration: none;"
+               onmouseover="this.style.borderColor='var(--amber-dim)'" onmouseout="this.style.borderColor='var(--border-hair)'">
+                <div class="flex items-center gap-3">
+                    <span class="material-symbols-rounded transition-colors" style="color: var(--text-dim);">support_agent</span>
+                    <div class="text-start">
+                        <div class="text-sm font-bold" style="color: var(--text-primary);" data-i18n="support_contact_btn">تواصل مع الدعم</div>
+                        <div class="text-[10.5px]" style="color: var(--text-faint);" data-i18n="support_contact_desc">مشكلة تقنية أو استفسار؟</div>
+                    </div>
+                </div>
+                <span class="material-symbols-rounded text-base" style="color: var(--text-faint);">mail</span>
+            </a>
         </div>
 
         <div class="mt-auto pt-5 border-t flex justify-between items-center" style="border-color: var(--border-hair);">
@@ -573,6 +588,71 @@
         </div>
     </div>
 
+    <!-- Feedback / Rating Modal -->
+    <div id="feedback-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center opacity-0 transition-opacity duration-300" style="background: rgba(6,8,10,0.85); backdrop-filter: blur(6px);">
+        <div class="border rounded-2xl p-8 max-w-md w-full shadow-2xl relative transform scale-95 transition-transform duration-300" style="background: var(--bg-panel); border-color: var(--border-hair);">
+            <div class="text-center mb-6">
+                <div class="w-14 h-14 rounded-xl border flex items-center justify-center mx-auto mb-5" style="background: var(--bg-void); border-color: var(--border-hair-lit);">
+                    <span class="material-symbols-rounded text-3xl" style="color: var(--amber);">rate_review</span>
+                </div>
+                <div class="label-eyebrow mb-3" data-i18n="feedback_eyebrow">رأيك يهمنا</div>
+                <h3 class="text-lg font-bold mb-2" style="color: var(--text-primary);" data-i18n="feedback_title">كيف كانت تجربتك حتى الآن؟</h3>
+                <p class="text-sm leading-relaxed" style="color: var(--text-dim);" data-i18n="feedback_desc">تقييمك يساعدنا نطوّر المنتج بشكل أفضل.</p>
+            </div>
+
+            <!-- النجوم -->
+            <div class="flex items-center justify-center gap-2 mb-5" id="feedback-stars">
+                <button type="button" class="feedback-star transition-transform" data-star="1" onclick="setFeedbackRating(1)">
+                    <span class="material-symbols-rounded text-4xl" style="color: var(--border-hair-lit);">star</span>
+                </button>
+                <button type="button" class="feedback-star transition-transform" data-star="2" onclick="setFeedbackRating(2)">
+                    <span class="material-symbols-rounded text-4xl" style="color: var(--border-hair-lit);">star</span>
+                </button>
+                <button type="button" class="feedback-star transition-transform" data-star="3" onclick="setFeedbackRating(3)">
+                    <span class="material-symbols-rounded text-4xl" style="color: var(--border-hair-lit);">star</span>
+                </button>
+                <button type="button" class="feedback-star transition-transform" data-star="4" onclick="setFeedbackRating(4)">
+                    <span class="material-symbols-rounded text-4xl" style="color: var(--border-hair-lit);">star</span>
+                </button>
+                <button type="button" class="feedback-star transition-transform" data-star="5" onclick="setFeedbackRating(5)">
+                    <span class="material-symbols-rounded text-4xl" style="color: var(--border-hair-lit);">star</span>
+                </button>
+            </div>
+
+            <textarea id="feedback-comment" data-i18n="feedback_comment_ph" placeholder="أي ملاحظات أو اقتراحات؟ (اختياري)"
+                      class="w-full rounded-lg px-4 py-3 text-sm outline-none transition-colors mb-4 resize-none"
+                      style="background: var(--bg-void); border: 1px solid var(--border-hair-lit); color: var(--text-primary);"
+                      rows="3"></textarea>
+
+            <label class="flex items-center gap-2.5 mb-3 cursor-pointer select-none">
+                <input type="checkbox" id="feedback-consent" onchange="toggleFeedbackConsentFields()"
+                       class="w-4 h-4 rounded" style="accent-color: var(--amber);">
+                <span class="text-xs" style="color: var(--text-dim);" data-i18n="feedback_consent_label">أوافق على نشر رأيي على موقعنا</span>
+            </label>
+
+            <div id="feedback-consent-fields" class="hidden space-y-2.5 mb-4">
+                <input type="text" id="feedback-display-name" data-i18n="feedback_name_ph" placeholder="اسمك (اختياري، يظهر مع رأيك)"
+                       class="w-full rounded-lg px-4 py-2.5 text-sm outline-none transition-colors"
+                       style="background: var(--bg-void); border: 1px solid var(--border-hair-lit); color: var(--text-primary);">
+                <input type="text" id="feedback-organization" data-i18n="feedback_org_ph" placeholder="جهة العمل (اختياري، مثال: مكتب محاماة)"
+                       class="w-full rounded-lg px-4 py-2.5 text-sm outline-none transition-colors"
+                       style="background: var(--bg-void); border: 1px solid var(--border-hair-lit); color: var(--text-primary);">
+            </div>
+
+            <p id="feedback-error" class="text-xs mb-3 text-center hidden" style="color: var(--red);"></p>
+
+            <button onclick="submitFeedbackForm()" id="feedback-submit-btn"
+                    class="btn-primary w-full py-3.5 rounded-lg font-bold text-sm transition-colors flex items-center justify-center gap-2">
+                <span class="material-symbols-rounded text-lg">send</span>
+                <span data-i18n="feedback_submit_btn">إرسال التقييم</span>
+            </button>
+
+            <button onclick="dismissFeedbackModal()" class="w-full mt-2.5 py-2.5 rounded-lg text-xs font-bold transition-colors" style="background: transparent; color: var(--text-faint);">
+                <span data-i18n="feedback_skip_btn">لاحقاً</span>
+            </button>
+        </div>
+    </div>
+
     <script>
         /* --- Translation & Localization System --- */
         const translations = {
@@ -680,7 +760,22 @@
                 websearch_warning_title: "هذا يخرج بيانات من جهازك",
                 websearch_warning_body: "عند تفعيل هذا الخيار، سؤالك يُرسل مباشرة من هذا الجهاز إلى محرك بحث خارجي (DuckDuckGo) للحصول على نتائج حديثة من الويب. هذا يخالف مبدأ \"لا شيء يخرج من الجهاز\" المعتمد بباقي التطبيق. الأرشيف الداخلي للشركة يبقى دائماً محلياً ولا يتأثر بهذا الخيار.",
                 websearch_warning_cancel: "إلغاء",
-                websearch_warning_confirm: "تفعيل رغم ذلك"
+                websearch_warning_confirm: "تفعيل رغم ذلك",
+
+                feedback_eyebrow: "رأيك يهمنا",
+                feedback_title: "كيف كانت تجربتك حتى الآن؟",
+                feedback_desc: "تقييمك يساعدنا نطوّر المنتج بشكل أفضل.",
+                feedback_comment_ph: "أي ملاحظات أو اقتراحات؟ (اختياري)",
+                feedback_consent_label: "أوافق على نشر رأيي على موقعنا",
+                feedback_name_ph: "اسمك (اختياري، يظهر مع رأيك)",
+                feedback_org_ph: "جهة العمل (اختياري، مثال: مكتب محاماة)",
+                feedback_submit_btn: "إرسال التقييم",
+                feedback_skip_btn: "لاحقاً",
+                feedback_thanks: "شكراً لك! تقييمك وصلنا بنجاح.",
+                feedback_rating_required: "الرجاء اختيار تقييم بالنجوم أولاً",
+
+                support_contact_btn: "تواصل مع الدعم",
+                support_contact_desc: "مشكلة تقنية أو استفسار؟"
             },
             en: {
                 locked_eyebrow: "ACCESS CONTROL",
@@ -786,7 +881,22 @@
                 websearch_warning_title: "This sends data outside your device",
                 websearch_warning_body: "When enabled, your question is sent directly from this device to an external search engine (DuckDuckGo) to get up-to-date web results. This breaks the \"nothing leaves this device\" principle used elsewhere in the app. Your internal company archive always stays local and is unaffected by this setting.",
                 websearch_warning_cancel: "Cancel",
-                websearch_warning_confirm: "Enable Anyway"
+                websearch_warning_confirm: "Enable Anyway",
+
+                feedback_eyebrow: "We'd love your feedback",
+                feedback_title: "How has your experience been?",
+                feedback_desc: "Your rating helps us improve the product.",
+                feedback_comment_ph: "Any feedback or suggestions? (optional)",
+                feedback_consent_label: "I agree to have my review published on your website",
+                feedback_name_ph: "Your name (optional, shown with your review)",
+                feedback_org_ph: "Organization (optional, e.g. Law Firm)",
+                feedback_submit_btn: "Submit Rating",
+                feedback_skip_btn: "Later",
+                feedback_thanks: "Thank you! Your feedback was received.",
+                feedback_rating_required: "Please select a star rating first",
+
+                support_contact_btn: "Contact Support",
+                support_contact_desc: "Technical issue or question?"
             }
         };
 
@@ -801,6 +911,8 @@
                 const key = el.getAttribute('data-i18n');
                 if (translations[currentLang][key]) {
                     if (el.tagName === 'INPUT' && el.type === 'text') {
+                        el.placeholder = translations[currentLang][key];
+                    } else if (el.tagName === 'TEXTAREA') {
                         el.placeholder = translations[currentLang][key];
                     } else {
                         el.innerHTML = translations[currentLang][key];
@@ -957,6 +1069,7 @@
             applyLanguage();
             checkLocalLicense();
             refreshInstalledModels();
+            checkFeedbackPrompt();
 
             // فحص دوري لحالة الترخيص (يسمح باكتشاف انتهاء الاشتراك، وأيضاً
             // بفتح النظام تلقائياً لو المستخدم فعّل المفتاح من نافذة أخرى)
@@ -1606,6 +1719,112 @@
             } catch (e) {
                 errorEl.textContent = translations[currentLang].toast_error;
                 errorEl.classList.remove('hidden');
+            }
+        }
+
+        // ===========================================================
+        // نظام طلب التقييم (In-App Feedback)
+        // ===========================================================
+        let feedbackSelectedRating = 0;
+
+        async function checkFeedbackPrompt() {
+            try {
+                const res = await fetch('/api/feedback/should-show');
+                if (!res.ok) return;
+                const data = await res.json();
+                // لا نعرض نافذة التقييم إذا كان النظام لا يزال مقفلاً (شاشة الترخيص/
+                // تسجيل الدخول لها أولوية أعلى)، حتى لا تتزاحم النافذتان فوق بعض.
+                if (data.show && !isSystemLocked) openFeedbackModal();
+            } catch (e) {
+                // فشل صامت — لا داعي لإزعاج المستخدم بخطأ على ميزة غير أساسية
+            }
+        }
+
+        function openFeedbackModal() {
+            const modal = document.getElementById('feedback-modal');
+            modal.classList.remove('hidden');
+            setTimeout(() => modal.classList.add('modal-active'), 10);
+        }
+
+        function closeFeedbackModalUI() {
+            const modal = document.getElementById('feedback-modal');
+            modal.classList.remove('modal-active');
+            setTimeout(() => modal.classList.add('hidden'), 300);
+        }
+
+        function setFeedbackRating(stars) {
+            feedbackSelectedRating = stars;
+            document.querySelectorAll('.feedback-star').forEach(btn => {
+                const starNum = parseInt(btn.getAttribute('data-star'), 10);
+                const icon = btn.querySelector('.material-symbols-rounded');
+                icon.style.color = starNum <= stars ? 'var(--amber)' : 'var(--border-hair-lit)';
+            });
+            document.getElementById('feedback-error').classList.add('hidden');
+        }
+
+        function toggleFeedbackConsentFields() {
+            const checked = document.getElementById('feedback-consent').checked;
+            document.getElementById('feedback-consent-fields').classList.toggle('hidden', !checked);
+        }
+
+        async function submitFeedbackForm() {
+            const errorEl = document.getElementById('feedback-error');
+            const btn = document.getElementById('feedback-submit-btn');
+
+            if (feedbackSelectedRating < 1) {
+                errorEl.textContent = translations[currentLang].feedback_rating_required;
+                errorEl.classList.remove('hidden');
+                return;
+            }
+
+            const comment = document.getElementById('feedback-comment').value.trim();
+            const consent = document.getElementById('feedback-consent').checked;
+            const displayName = document.getElementById('feedback-display-name').value.trim();
+            const organization = document.getElementById('feedback-organization').value.trim();
+
+            btn.disabled = true;
+            const originalContent = btn.innerHTML;
+            btn.innerHTML = `<span class="material-symbols-rounded text-lg animate-spin">progress_activity</span>`;
+
+            try {
+                const res = await fetch('/api/feedback/submit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        rating: feedbackSelectedRating,
+                        comment,
+                        consent_to_publish: consent,
+                        display_name: displayName,
+                        organization
+                    })
+                });
+
+                if (res.ok) {
+                    showToast(translations[currentLang].feedback_thanks, 'success');
+                    closeFeedbackModalUI();
+                } else {
+                    errorEl.textContent = translations[currentLang].toast_error;
+                    errorEl.classList.remove('hidden');
+                }
+            } catch (e) {
+                errorEl.textContent = translations[currentLang].toast_error;
+                errorEl.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+            }
+        }
+
+        async function dismissFeedbackModal() {
+            closeFeedbackModalUI();
+            try {
+                await fetch('/api/feedback/dismiss', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ permanently: true })
+                });
+            } catch (e) {
+                // فشل صامت — لا ضرر لو لم يُسجَّل الإغلاق، سنسأل مرة أخرى لاحقاً في أسوأ الأحوال
             }
         }
 
