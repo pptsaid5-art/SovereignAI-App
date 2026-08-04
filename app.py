@@ -77,6 +77,28 @@ auth_rbac.init_auth_db(RAG_DB_DIR)
 OFFLINE_GRACE_PERIOD_DAYS = 5
 
 # ---------------------------------------------------------
+# نظام طلب التقييم داخل التطبيق (In-App Feedback)
+# ---------------------------------------------------------
+FEEDBACK_STATE_PATH = os.path.join(os.path.abspath("."), "feedback_state.json")
+FEEDBACK_PROMPT_AFTER_DAYS = int(os.environ.get("FEEDBACK_PROMPT_AFTER_DAYS", "3"))
+
+
+def load_feedback_state() -> dict:
+    if not os.path.exists(FEEDBACK_STATE_PATH):
+        return {}
+    try:
+        with open(FEEDBACK_STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_feedback_state(state: dict):
+    with open(FEEDBACK_STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------
 # إعدادات جودة الاسترجاع (RAG Retrieval Quality)
 # ---------------------------------------------------------
 # chromadb مع sentence-transformers يستخدم افتراضياً L2 distance (مسافة إقليدية)
@@ -359,8 +381,10 @@ def get_chroma_client():
         return chromadb.PersistentClient(path=RAG_DB_DIR)
 
 
-# اسم نموذج التضمين (embedding) الذي يجب سحبه مسبقاً عبر Ollama.
-# nomic-embed-text خفيف (~274MB) ومخصص للتضمين، ويعمل بالكامل محلياً بدون إنترنت.
+# اسم نموذج التضمين الحالي — لو غيّرته يوماً (مثلاً لنموذج embedding أحدث
+# أو أكبر)، فقط غيّر هذه القيمة. النظام أدناه سيكتشف تلقائياً أن المستندات
+# القديمة تستخدم نموذجاً مختلفاً، ويمكن إعادة فهرستها عبر /api/admin/reindex
+# دون أن يحتاج المستخدم لإعادة رفع أي ملف يدوياً.
 OLLAMA_EMBEDDING_MODEL = os.environ.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
 
 
@@ -426,9 +450,9 @@ download_status = {
 }
 
 OLLAMA_MODELS = {
-    "flash": "qwen2.5:1.5b",
-    "plus": "qwen2.5:7b",
-    "pro": "qwen2.5:32b",
+    "flash": "qwen3.5:2b",
+    "plus": "qwen3.5:9b",
+    "pro": "gemma4:31b",
 }
 
 
@@ -458,7 +482,7 @@ class ModelRequest(BaseModel):
 @app.post("/api/models/install")
 async def install_model_api(request: ModelRequest, bg_tasks: BackgroundTasks):
     model_key = request.model_key
-    actual_name = OLLAMA_MODELS.get(model_key, "qwen2.5:1.5b")
+    actual_name = OLLAMA_MODELS.get(model_key, "qwen3.5:2b")
     bg_tasks.add_task(real_pull_model_task, model_key, actual_name)
     return {"status": "started", "actual_model": actual_name}
 
@@ -491,6 +515,95 @@ async def get_installed_models():
         if actual_name in installed_actual_names or f"{actual_name}:latest" in installed_actual_names
     ]
     return {"installed": installed_keys}
+
+
+# ---------------------------------------------------------
+# طلب التقييم (Feedback / Reviews)
+# ---------------------------------------------------------
+@app.get("/api/feedback/should-show")
+async def feedback_should_show():
+    """
+    تستدعيها الواجهة عند فتح التطبيق لتقرر هل تعرض نافذة طلب التقييم.
+    المنطق: أول مرة يفتح فيها المستخدم التطبيق نسجّل first_seen_at.
+    بعد مرور FEEDBACK_PROMPT_AFTER_DAYS ولم يُقدَّم تقييم بعد، نطلب منه ذلك.
+    يُعرض مرة واحدة فقط (حتى لو أغلقها المستخدم دون تقييم، لا نزعجه مرة ثانية
+    تلقائياً — لكن يمكنه لاحقاً إرسال رأيه من قائمة الإعدادات إن أردت إضافة ذلك).
+    """
+    state = load_feedback_state()
+
+    if "first_seen_at" not in state:
+        state["first_seen_at"] = time.time()
+        save_feedback_state(state)
+        return {"show": False}
+
+    if state.get("submitted") or state.get("dismissed"):
+        return {"show": False}
+
+    days_elapsed = (time.time() - state["first_seen_at"]) / 86400
+    return {"show": days_elapsed >= FEEDBACK_PROMPT_AFTER_DAYS}
+
+
+class FeedbackDismissRequest(BaseModel):
+    permanently: bool = True
+
+
+@app.post("/api/feedback/dismiss")
+async def feedback_dismiss(data: FeedbackDismissRequest):
+    """يُستدعى لو المستخدم أغلق نافذة التقييم دون إرسال رأيه."""
+    state = load_feedback_state()
+    if data.permanently:
+        state["dismissed"] = True
+    save_feedback_state(state)
+    return {"ok": True}
+
+
+class FeedbackSubmitRequest(BaseModel):
+    rating: int
+    comment: str = ""
+    consent_to_publish: bool = False
+    display_name: str = ""
+    organization: str = ""
+
+
+@app.post("/api/feedback/submit")
+async def feedback_submit(data: FeedbackSubmitRequest):
+    """
+    يُرسل تقييم المستخدم لسيرفر Railway المركزي (مرتبطاً بـ hwid هذا
+    الجهاز، بدون أي معلومة تعريفية أخرى إلا لو وافق المستخدم صراحة على
+    نشر اسمه/جهته عبر consent_to_publish).
+    """
+    if not (1 <= data.rating <= 5):
+        raise HTTPException(status_code=400, detail="التقييم يجب أن يكون بين 1 و 5")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{LICENSE_SERVER_URL}/api/feedback/submit",
+                json={
+                    "hwid": DEVICE_HWID,
+                    "rating": data.rating,
+                    "comment": data.comment,
+                    "consent_to_publish": data.consent_to_publish,
+                    "display_name": data.display_name,
+                    "organization": data.organization,
+                },
+            )
+        server_ok = resp.status_code == 200
+    except Exception:
+        server_ok = False
+
+    # نسجّل محلياً أنه تم الإرسال بغض النظر عن نجاح الوصول للسيرفر،
+    # حتى لا نزعج المستخدم بطلب التقييم مرة أخرى. لو فشل الإرسال فعلياً
+    # (لا إنترنت)، نحتفظ بنسخة محلية يمكن مراجعتها لاحقاً يدوياً إن أردت.
+    state = load_feedback_state()
+    state["submitted"] = True
+    if not server_ok:
+        pending = state.get("pending_unsent", [])
+        pending.append(data.dict())
+        state["pending_unsent"] = pending
+    save_feedback_state(state)
+
+    return {"success": True, "synced_to_server": server_ok}
 
 
 # ---------------------------------------------------------
@@ -959,12 +1072,135 @@ async def upload_endpoint(request: Request, files: List[UploadFile] = File(...),
                 rag_collection.add(
                     documents=[chunk],
                     ids=[f"{file.filename}_{idx}_{uuid.uuid4().hex[:6]}"],
-                    metadatas=[{"source": file.filename, "tags": tags_str}],
+                    metadatas=[{
+                        "source": file.filename,
+                        "tags": tags_str,
+                        # نسجّل بأي نموذج embedding تم توليد هذا المتجه، حتى نعرف
+                        # لاحقاً أي المستندات "قديمة" (بنموذج مختلف عن الحالي)
+                        # وتحتاج إعادة فهرسة بعد أي تحديث لنموذج التضمين نفسه.
+                        "embedding_model": OLLAMA_EMBEDDING_MODEL,
+                    }],
                 )
             except Exception as e:
                 print(f"Vector DB Error: {str(e)}")
 
     return {"status": "success"}
+
+
+# ---------------------------------------------------------
+# إعادة فهرسة قاعدة المعرفة عند تحديث نموذج الـ Embedding
+# ---------------------------------------------------------
+reindex_status = {"status": "idle", "total": 0, "done": 0, "error": None}
+
+
+async def _run_reindex_task():
+    """
+    يمر على كل المستندات المخزّنة في chromadb، ويعيد توليد embedding لأي
+    مستند لم يُخزَّن بنموذج OLLAMA_EMBEDDING_MODEL الحالي (أي مستندات
+    قديمة من نموذج تضمين سابق). النص الأصلي والمصدر والوسوم تبقى كما هي
+    تماماً — فقط المتجه الرقمي (embedding) يُعاد توليده. هذا يشغّل بخيط
+    خلفي لأنه قد يستغرق وقتاً حسب حجم قاعدة المعرفة.
+    """
+    global reindex_status
+    reindex_status = {"status": "running", "total": 0, "done": 0, "error": None}
+
+    try:
+        client = get_chroma_client()
+        rag_collection = client.get_or_create_collection(
+            name="company_knowledge", embedding_function=_ollama_embedding_function
+        )
+
+        # نجيب كل شيء (بدون حد أقصى) مع النصوص والميتاداتا
+        all_docs = rag_collection.get(include=["documents", "metadatas"])
+        ids = all_docs.get("ids", [])
+        documents = all_docs.get("documents", [])
+        metadatas = all_docs.get("metadatas", [])
+
+        # نحدد فقط المستندات القديمة (بنموذج تضمين مختلف عن الحالي، أو بلا تسجيل أصلاً)
+        to_reindex = [
+            (doc_id, doc, meta)
+            for doc_id, doc, meta in zip(ids, documents, metadatas)
+            if (meta or {}).get("embedding_model") != OLLAMA_EMBEDDING_MODEL
+        ]
+
+        reindex_status["total"] = len(to_reindex)
+
+        for doc_id, doc, meta in to_reindex:
+            new_meta = dict(meta or {})
+            new_meta["embedding_model"] = OLLAMA_EMBEDDING_MODEL
+
+            # rag_collection.update() تُعيد توليد الـ embedding تلقائياً عند
+            # تمرير "documents" من جديد، لأن embedding_function المرتبطة
+            # بالـ collection تُستدعى مجدداً على النص نفسه.
+            rag_collection.update(
+                ids=[doc_id],
+                documents=[doc],
+                metadatas=[new_meta],
+            )
+            reindex_status["done"] += 1
+
+        reindex_status["status"] = "completed"
+
+    except Exception as e:
+        reindex_status["status"] = "error"
+        reindex_status["error"] = str(e)
+
+
+@app.post("/api/admin/reindex")
+async def admin_reindex(request: Request, bg_tasks: BackgroundTasks):
+    """
+    يُشغَّل يدوياً من جهاز الأدمن (Host) بعد تحديث OLLAMA_EMBEDDING_MODEL
+    لنموذج جديد. يبدأ إعادة الفهرسة بخيط خلفي، ويمكن متابعة تقدمها عبر
+    /api/admin/reindex/status. لا يحتاج المستخدم إعادة رفع أي ملف —
+    النصوص الأصلية محفوظة أصلاً في chromadb ويُعاد استخدامها مباشرة.
+    """
+    _require_admin(request)
+
+    if reindex_status["status"] == "running":
+        raise HTTPException(status_code=409, detail="عملية إعادة فهرسة أخرى قيد التنفيذ بالفعل")
+
+    bg_tasks.add_task(_run_reindex_task)
+    return {"status": "started"}
+
+
+@app.get("/api/admin/reindex/status")
+async def admin_reindex_status(request: Request):
+    """يعرض تقدم عملية إعادة الفهرسة الحالية أو الأخيرة."""
+    _require_admin(request)
+    return reindex_status
+
+
+@app.get("/api/admin/embedding-info")
+async def admin_embedding_info(request: Request):
+    """
+    يعرض معلومات سريعة: النموذج الحالي المضبوط، وعدد المستندات القديمة
+    (بنموذج مختلف) التي تحتاج إعادة فهرسة — مفيد لمعرفة هل /api/admin/reindex
+    ضروري أصلاً قبل تشغيله.
+    """
+    _require_admin(request)
+
+    try:
+        client = get_chroma_client()
+        rag_collection = client.get_or_create_collection(
+            name="company_knowledge", embedding_function=_ollama_embedding_function
+        )
+        all_docs = rag_collection.get(include=["metadatas"])
+        metadatas = all_docs.get("metadatas", [])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذّر قراءة قاعدة المعرفة: {str(e)}")
+
+    total = len(metadatas)
+    outdated = sum(
+        1 for meta in metadatas
+        if (meta or {}).get("embedding_model") != OLLAMA_EMBEDDING_MODEL
+    )
+
+    return {
+        "current_embedding_model": OLLAMA_EMBEDDING_MODEL,
+        "total_documents": total,
+        "outdated_documents": outdated,
+        "needs_reindex": outdated > 0,
+    }
 
 
 # ---------------------------------------------------------
@@ -1052,7 +1288,7 @@ async def chat_endpoint(request: Request, data: ChatMessage):
     if not state.get("active"):
         raise HTTPException(status_code=403, detail="Unlicensed")
 
-    actual_name = OLLAMA_MODELS.get(data.model, "qwen2.5:1.5b")
+    actual_name = OLLAMA_MODELS.get(data.model, "qwen3.5:2b")
 
     # لو موظف مسجّل دخول (له توكن صالح)، نجيب وسومه المسموحة لفلترة النتائج.
     # زائر بدون تسجيل دخول (أو جهاز standalone بدون نظام موظفين مفعّل)
